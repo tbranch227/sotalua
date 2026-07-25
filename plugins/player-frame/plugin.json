@@ -1,0 +1,9 @@
+{
+  "slug": "player-frame",
+  "name": "Player Frame",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Your own health, focus and gold in one place, with a combat indicator and an optional pet health bar. Survives the client's habit of not publishing the player globals until they change.",
+  "minApiVersion": 1,
+  "permissions": []
+}

@@ -11,8 +11,8 @@ local H = dofile((os.getenv("SOTALUA_ROOT") or "./") .. "tests/helper.lua")
 
 local PLUGINS = {
     "addon-inspector", "api-probe", "buff-bars", "loot-tracker", "party-frames",
-    "perf-monitor", "scene-info", "session-log", "target-frame", "world-clock",
-    "xp-tracker",
+    "perf-monitor", "player-frame", "scene-info", "session-log", "target-frame",
+    "world-clock", "xp-tracker",
 }
 
 --- A world with something in every system, so no plugin renders against nil.
@@ -427,6 +427,143 @@ describe("late per-frame player globals", function()
             end
             H.teardown()
         end
+    end)
+end)
+
+describe("player-frame", function()
+    local M, plugin
+
+    local function build(boot)
+        M = H.bootstrap(boot or { world = populatedWorld })
+        plugin = H.plugin("player-frame", M)
+        H.installHandlers(M)
+        H.host.start()
+        return plugin
+    end
+
+    after_each(H.teardown)
+
+    it("prefers a real max stat over guessing", function()
+        build({ world = function(w)
+            populatedWorld(w)
+            w.player.health = 625
+            w.stats[#w.stats + 1] = { name = "MaxHealth", description = "Max Health", value = 900 }
+        end })
+        plugin.render()
+
+        local maximum, source = plugin.resolveMax("health", 625)
+        assert_that.equal(900, maximum)
+        assert_that.equal("stat MaxHealth", source)
+        assert_that.is_true(H.host.hasText("625 / 900"))
+    end)
+
+    it("falls back to the highest value seen when no stat matches", function()
+        build({ world = function(w)
+            populatedWorld(w)
+            -- No health-shaped stat at all, which is the case on a client whose
+            -- stat names we have not confirmed.
+            w.stats = { { name = "Strength", description = "Strength", value = 55 } }
+            w.player.health = 400
+        end })
+        plugin.render()
+
+        local maximum, source = plugin.resolveMax("health", 400)
+        assert_that.equal(400, maximum)
+        assert_that.equal("session peak", source)
+    end)
+
+    it("keeps the peak when health drops, so the bar drains", function()
+        build({ world = function(w)
+            populatedWorld(w)
+            w.stats = { { name = "Strength", description = "Strength", value = 55 } }
+            w.player.health = 400
+        end })
+        plugin.render()
+
+        H.host.world.player.health = 100
+        H.host.refreshGlobals()
+        M.poll.invalidate()
+        plugin.render()
+
+        local maximum = plugin.resolveMax("health", 100)
+        assert_that.equal(400, maximum, "the peak must not follow the value down")
+        assert_that.is_true(H.host.hasText("100 / 400"))
+    end)
+
+    it("ignores a stat whose value is below current health", function()
+        -- Some tables expose a base value that buffs exceed; using it would
+        -- produce a bar permanently pinned past full.
+        build({ world = function(w)
+            populatedWorld(w)
+            w.stats = { { name = "MaxHealth", description = "Max Health", value = 100 } }
+            w.player.health = 625
+        end })
+        local maximum, source = plugin.resolveMax("health", 625)
+        assert_that.equal(625, maximum)
+        assert_that.equal("session peak", source)
+    end)
+
+    it("says it is waiting rather than showing an empty bar", function()
+        build({ world = function(w)
+            populatedWorld(w)
+            w.playerGlobalsPending = true
+        end })
+        plugin.render()
+
+        -- Absent globals are not zero. An empty red bar would read as "dead"
+        -- and a zero gold total as "broke".
+        assert_that.is_true(H.host.hasText("waiting for the host"))
+        assert_that.is_true(H.host.hasText("gold  waiting for the host"))
+    end)
+
+    it("picks the globals up once the host publishes them", function()
+        build({ world = function(w)
+            populatedWorld(w)
+            w.playerGlobalsPending = true
+        end })
+        plugin.render()
+        assert_that.is_false(H.host.hasText("gold  1,234"))
+
+        H.host.publishPlayerGlobals()
+        M.poll.invalidate()
+        plugin.render()
+        assert_that.is_true(H.host.hasText("gold  1,234"))
+    end)
+
+    it("shows the combat indicator", function()
+        build()
+        H.host.world.player.combat = true
+        plugin.render()
+        assert_that.is_true(H.host.hasText("[combat]"))
+    end)
+
+    it("shows the pet with its level and health", function()
+        build()
+        plugin.render()
+        assert_that.is_true(H.host.hasText("Wolf  lv 30"))
+        assert_that.is_true(H.host.hasText("200 / 300"))
+    end)
+
+    it("hides the pet row when there is no pet", function()
+        build({ world = function(w)
+            populatedWorld(w)
+            w.pet = nil
+        end })
+        plugin.render()
+        assert_that.is_false(H.host.hasText("lv 30"))
+    end)
+
+    it("honours a manual stat override", function()
+        build({ world = function(w)
+            populatedWorld(w)
+            w.stats[#w.stats + 1] = { name = "MaxHealth", description = "Max Health", value = 900 }
+            w.stats[#w.stats + 1] = { name = "Vitality", description = "Vitality", value = 1200 }
+        end })
+
+        M.settings.set("healthStat", "Vitality")
+        local maximum, source = plugin.resolveMax("health", 625)
+        assert_that.equal(1200, maximum)
+        assert_that.equal("stat Vitality", source)
     end)
 end)
 
