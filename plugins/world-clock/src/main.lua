@@ -86,7 +86,8 @@ return function(Core)
     addon.onStart(function()
         local window = layout.window({
             id = "clock",
-            title = nil,
+            title = "Time",
+            accentColor = "#FFC58A",
             x = 1600, y = 20, width = 210,
             resizable = "horizontal", minSize = 160, maxSize = 400,
         })

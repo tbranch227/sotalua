@@ -243,6 +243,17 @@ return function(M)
         return true
     end
 
+    --- Let pointer events pass through a widget, or block them.
+    --
+    -- Text and images intercept raycasts by default, so a label sitting on a
+    -- draggable panel silently swallows the drag: the window only moves when
+    -- grabbed by a bare patch of background. Decorative children should not
+    -- take input at all.
+    function UIx.setRaycast(w, enabled)
+        if not w then return false end
+        return ShroudRaycastObject(w.id, w.kind, enabled and true or false)
+    end
+
     function UIx.setAlpha(w, alpha)
         if not w then return false end
         return ShroudSetTransparency(w.id, w.kind, M.util.clamp(alpha, 0, 1))

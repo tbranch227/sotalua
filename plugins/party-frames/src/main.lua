@@ -84,7 +84,7 @@ return function(Core)
             end
             setVisible(true)
             for _, slot in ipairs(view.slots) do renderSlot(slot, nil) end
-            ui.setText(view.heading, "not in a party")
+            view.window:setTitle("Party  (solo)")
             return
         end
 
@@ -94,8 +94,9 @@ return function(Core)
         for _, member in ipairs(party) do
             if member.inScene then inScene = inScene + 1 end
         end
-        ui.setText(view.heading, string.format("Party  %d member%s, %d here",
-            #party, #party == 1 and "" or "s", inScene))
+        -- The counts live in the title bar rather than a body row: it is a
+        -- label for the window, and it frees a row for an actual member.
+        view.window:setTitle(string.format("Party  %d/%d here", inScene, #party))
 
         local lowPercent = Core.settings.get("lowHealthPercent") or 35
         for i, slot in ipairs(view.slots) do
@@ -115,14 +116,14 @@ return function(Core)
 
         local window = layout.window({
             id = "party",
-            title = nil,
+            title = "Party",
+            accentColor = "#4C9A5A",
             x = 20, y = 60, width = 220,
             resizable = "horizontal", minSize = 170, maxSize = 420,
         })
         if not window then return end
 
         view.window = window
-        view.heading = window:row("Party", { fontSize = 13, color = "#FFD98A" })
         for _ = 1, slots do
             local slot = {}
             slot.name = window:row("", { fontSize = 12, height = 14, gap = 0 })

@@ -553,10 +553,13 @@ function api.ShroudGetOnKeyUp(k) return world.keysReleased[k] == true end
 -- Widgets: creation ---------------------------------------------------
 
 local function newWidget(kind, x, y, w, h, extra)
+    -- raycast defaults to true, matching Unity: every Graphic is a raycast
+    -- target unless switched off. This is why a stack of labels over a
+    -- draggable panel eats the drag.
     local fields = { x = x or 0, y = y or 0, width = w or 0, height = h or 0,
                      visible = true, alpha = 1, color = nil, parent = nil,
                      draggable = false, resizable = nil, clickListener = false,
-                     hoverListener = false, destroyed = false }
+                     hoverListener = false, destroyed = false, raycast = true }
     for k, v in pairs(extra or {}) do fields[k] = v end
     return create(kind, fields)
 end

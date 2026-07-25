@@ -92,7 +92,8 @@ return function(Core)
     addon.onStart(function()
         local window = layout.window({
             id = "scene",
-            title = nil,
+            title = "Location",
+            accentColor = "#7FB8FF",
             x = 1600, y = 160, width = 230,
             resizable = "horizontal", minSize = 180, maxSize = 460,
         })

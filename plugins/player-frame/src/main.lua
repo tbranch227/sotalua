@@ -157,7 +157,8 @@ return function(Core)
     addon.onStart(function()
         local window = layout.window({
             id = "player",
-            title = nil,
+            title = "Player",
+            accentColor = "#4C9A5A",
             x = 280, y = 60, width = 220,
             resizable = "horizontal", minSize = 170, maxSize = 440,
         })

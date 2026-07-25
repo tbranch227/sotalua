@@ -131,7 +131,8 @@ return function(Core)
         local rows = util.clamp(Core.settings.get("runeRows") or 6, 0, 12)
         local window = layout.window({
             id = "target",
-            title = nil,
+            title = "Target",
+            accentColor = "#B03030",
             x = 700, y = 60, width = 240,
             resizable = "horizontal", minSize = 180, maxSize = 480,
         })

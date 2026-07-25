@@ -16,10 +16,29 @@ return function(M)
     local Window = {}
     Window.__index = Window
 
+    -- Title bar palette. Kept here rather than per-plugin so every window in
+    -- the suite reads as part of one set.
+    L.theme = {
+        body = "#101014",
+        header = "#1E1E2A",
+        headerHover = "#33334A",
+        accent = "#4C7AC8",
+        title = "#FFD98A",
+        grip = "#6A6A82",
+    }
+
+    local TITLE_HEIGHT = 22
+    local ACCENT_HEIGHT = 2
+
     --- Create a titled, draggable, position-persisting panel.
     --
     -- opts: id (required, the saved-variable key), title, x, y, width, height,
     -- color, alpha, resizable, minSize, maxSize.
+    --
+    -- The whole panel is the drag handle, not just the title bar. Everything
+    -- decorative is created with raycasting off so it cannot swallow the drag,
+    -- which is what makes the grippable area the full window rather than
+    -- whatever slivers of background the text rows leave uncovered.
     function L.window(opts)
         assert(opts and opts.id, "layout.window requires an id")
 
@@ -31,7 +50,7 @@ return function(M)
             y = placement.y or opts.y or 40,
             width = placement.width or opts.width or 240,
             height = placement.height or opts.height or 140,
-            color = opts.color or "#101014",
+            color = opts.color or L.theme.body,
             alpha = opts.alpha or 0.85,
             draggable = true,
             resizable = opts.resizable,
@@ -48,17 +67,96 @@ return function(M)
             nextY = opts.padding or 8,
             width = placement.width or opts.width or 240,
             children = {},
+            theme = {
+                header = opts.headerColor or L.theme.header,
+                headerHover = opts.headerHoverColor or L.theme.headerHover,
+                accent = opts.accentColor or L.theme.accent,
+                title = opts.titleColor or L.theme.title,
+            },
         }, Window)
 
-        if opts.title then
-            self.titleWidget = self:row(opts.title, { color = opts.titleColor or "#FFD98A", fontSize = 15 })
-        end
+        if opts.title then self:_buildHeader(opts) end
+
+        -- Hover feedback on the whole window. There is no cursor API in the
+        -- host -- nothing can turn the pointer into a move cursor -- so the
+        -- title bar lighting up is the available way to say "grab me".
+        M.ui.onHover(panel,
+            function() self:setHovered(true) end,
+            function() self:setHovered(false) end)
 
         L._register(self)
         return self
     end
 
+    --- Build the title bar: background strip, title text, grip hint, accent rule.
+    function Window:_buildHeader(opts)
+        self.header = M.ui.panel({
+            parent = self.panel,
+            x = 0, y = 0,
+            width = self.width, height = TITLE_HEIGHT,
+            color = self.theme.header,
+            alpha = 1.0,
+        })
+        -- Decoration only: input must reach the draggable parent underneath.
+        M.ui.setRaycast(self.header, false)
+
+        self.titleWidget = M.ui.text({
+            parent = self.header,
+            text = opts.title,
+            x = 8, y = 3,
+            width = self.width - 40, height = TITLE_HEIGHT - 4,
+            fontSize = opts.titleFontSize or 13,
+            color = self.theme.title,
+        })
+        M.ui.setRaycast(self.titleWidget, false)
+
+        -- A plain ASCII grip mark; the font's coverage of box-drawing glyphs is
+        -- not something this can rely on.
+        self.gripWidget = M.ui.text({
+            parent = self.header,
+            text = ":::",
+            x = self.width - 26, y = 3,
+            width = 20, height = TITLE_HEIGHT - 4,
+            fontSize = 12,
+            color = L.theme.grip,
+        })
+        M.ui.setRaycast(self.gripWidget, false)
+
+        self.accent = M.ui.panel({
+            parent = self.panel,
+            x = 0, y = TITLE_HEIGHT,
+            width = self.width, height = ACCENT_HEIGHT,
+            color = self.theme.accent,
+            alpha = 1.0,
+        })
+        M.ui.setRaycast(self.accent, false)
+
+        self.nextY = TITLE_HEIGHT + ACCENT_HEIGHT + self.padding
+    end
+
+    --- Brighten the title bar while the pointer is over the window.
+    function Window:setHovered(hovered)
+        if self.hovered == hovered then return end
+        self.hovered = hovered
+        if not self.header then return end
+        M.ui.setColor(self.header, hovered and self.theme.headerHover or self.theme.header)
+        if self.gripWidget then
+            M.ui.setColor(self.gripWidget, hovered and self.theme.title or L.theme.grip)
+        end
+    end
+
+    --- Change the title text after creation.
+    function Window:setTitle(text)
+        if not self.titleWidget then return false end
+        return M.ui.setText(self.titleWidget, text)
+    end
+
     --- Add a full-width text row and advance the cursor.
+    --
+    -- Rows do not take pointer input unless asked to. A Unity Text raycasts by
+    -- default, so a stack of labels over a draggable panel turns the window
+    -- into a set of dead zones separated by thin grabbable gaps. Pass
+    -- `interactive = true` for a row that genuinely needs clicks.
     function Window:row(text, opts)
         opts = opts or {}
         local widget = M.ui.text({
@@ -72,6 +170,7 @@ return function(M)
             color = opts.color,
             align = opts.align,
         })
+        M.ui.setRaycast(widget, opts.interactive == true)
         if not opts.y then
             self.nextY = self.nextY + (opts.height or self.rowHeight) + (opts.gap or 2)
         end
@@ -107,6 +206,12 @@ return function(M)
             fontSize = opts.fontSize or 11,
             color = opts.textColor or "#FFFFFF",
         })
+
+        -- A bar is three stacked widgets covering the full row width; leaving
+        -- any of them raycasting would carve a dead stripe across the window.
+        M.ui.setRaycast(track, false)
+        M.ui.setRaycast(fill, false)
+        M.ui.setRaycast(label, false)
 
         if not opts.y then
             self.nextY = self.nextY + height + (opts.gap or 3)

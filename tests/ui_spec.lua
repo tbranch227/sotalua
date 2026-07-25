@@ -233,6 +233,66 @@ describe("layout", function()
         assert_that.equal(20, stored.b.y)
     end)
 
+    it("builds a styled title bar with an accent rule", function()
+        local window = M.layout.window({ id = "main", title = "Target", x = 0, y = 0, width = 200 })
+        assert_that.truthy(window.header, "no header panel was created")
+        assert_that.truthy(window.accent, "no accent rule was created")
+        assert_that.is_true(H.host.hasText("Target"))
+        assert_that.is_true(H.host.hasText(":::"), "no grip hint")
+
+        -- Content must start below the title bar, not under it.
+        assert_that.truthy(window.nextY >= 24,
+            "content cursor at " .. window.nextY .. " overlaps the title bar")
+    end)
+
+    it("makes the whole window grabbable, not just the background", function()
+        -- A Unity Text raycasts by default, so labels stacked on a draggable
+        -- panel carve it into dead zones. Everything decorative must be
+        -- transparent to the pointer.
+        local window = M.layout.window({ id = "main", title = "Stats", x = 0, y = 0, width = 200 })
+        window:row("Health: 80")
+        window:bar({ text = "hp" })
+
+        for _, widget in ipairs(H.host.liveWidgets()) do
+            local isPanel = widget.kind == UI.Panel
+            local isRoot = widget.id == window.panel.id and isPanel
+            if not isRoot then
+                assert_that.is_false(widget.raycast,
+                    "a decorative widget still intercepts the drag")
+            end
+        end
+    end)
+
+    it("keeps a row interactive when asked", function()
+        local window = M.layout.window({ id = "main", title = "T", x = 0, y = 0, width = 200 })
+        local clickable = window:row("click me", { interactive = true })
+        for _, widget in ipairs(H.host.liveWidgets(UI.Text)) do
+            if widget.id == clickable.id then
+                assert_that.is_true(widget.raycast)
+            end
+        end
+    end)
+
+    it("lights the title bar while the pointer is over the window", function()
+        -- The host exposes no cursor API, so this is the only way to signal
+        -- that a window can be grabbed.
+        local window = M.layout.window({ id = "main", title = "T", x = 0, y = 0, width = 200 })
+        local header = H.host.liveWidgets(UI.Panel)[2]
+        local resting = header.color
+
+        H.host.hoverWidget(window.panel.id, UI.Panel)
+        assert_that.not_equal(resting, header.color, "hover did not change the title bar")
+
+        H.host.unhoverWidget(window.panel.id, UI.Panel)
+        assert_that.equal(resting, header.color, "the title bar did not settle back")
+    end)
+
+    it("retitles a window after creation", function()
+        local window = M.layout.window({ id = "main", title = "Party", x = 0, y = 0, width = 200 })
+        window:setTitle("Party  2/3 here")
+        assert_that.is_true(H.host.hasText("Party  2/3 here"))
+    end)
+
     it("draws an unknown bar rather than a full one", function()
         local window = M.layout.window({ id = "main", x = 0, y = 0, width = 200 })
         local bar = window:bar({ text = "??" })
