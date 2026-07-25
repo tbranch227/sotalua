@@ -23,6 +23,7 @@ Usage:
   python3 tools/build.py target-frame # one plugin
 """
 
+import hashlib
 import json
 import os
 import re
@@ -171,6 +172,16 @@ def build_plugin(slug, verbose=True):
     parts.append("local __core = {}")
     for name in resolve_modules(meta.get("modules")):
         parts.append(wrap_module(name, read(os.path.join(CORE, "%s.lua" % name))))
+    # A content hash of everything that went into this bundle. Printed by
+    # env.describe(), so "is the client running the build I just installed?" is
+    # answerable from chat instead of inferred from whether a reload happened.
+    digest = hashlib.sha256()
+    for name in resolve_modules(meta.get("modules")):
+        digest.update(read(os.path.join(CORE, "%s.lua" % name)).encode("utf-8"))
+    digest.update(read(entry).encode("utf-8"))
+    build_id = digest.hexdigest()[:8]
+
+    parts.append("__core.buildId = %s" % lua_string(build_id))
     parts.append("local Core = __core")
     parts.append("")
 

@@ -116,10 +116,15 @@ return function(M)
     end
 
     --- A summary line for the api-probe addon and for test assertions.
+    --
+    -- The build id is a content hash the bundler injects. Without it there is
+    -- no way to tell from in game whether a freshly installed file has actually
+    -- been picked up, since /lua reload is what loads it and a stale build
+    -- looks identical to a current one.
     function E.describe()
         return string.format(
-            "%s v%s (slug=%s) on Lua API %d [target=%s mouse=%s icons=%s]",
-            state.name, state.version, state.slug, E.API,
+            "%s v%s+%s (slug=%s) on Lua API %d [target=%s mouse=%s icons=%s]",
+            state.name, state.version, M.buildId or "src", state.slug, E.API,
             tostring(E.HAS_TARGET), tostring(E.HAS_MOUSE), tostring(E.HAS_ICONS)
         )
     end
