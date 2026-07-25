@@ -239,11 +239,13 @@ return function(M)
     function P.scene()
         return frameCache("scene", function()
             if not ShroudGetCurrentSceneName then return nil end
+            local orientation = ShroudGetCurrentSceneOrientation
+            local maxPlayers = ShroudGetCurrentSceneMaxPlayerCount
             return {
                 name = M.util.nameOr(ShroudGetCurrentSceneName(), "Unknown"),
                 raw = ShroudGetCurrentSceneNameRaw and ShroudGetCurrentSceneNameRaw() or "",
-                orientation = M.util.numberOr(ShroudGetCurrentSceneOrientation and ShroudGetCurrentSceneOrientation(), 0),
-                maxPlayers = M.util.numberOr(ShroudGetCurrentSceneMaxPlayerCount and ShroudGetCurrentSceneMaxPlayerCount(), -1),
+                orientation = M.util.numberOr(orientation and orientation(), 0),
+                maxPlayers = M.util.numberOr(maxPlayers and maxPlayers(), -1),
                 isPvp = ShroudGetCurrentSceneIsPVP and ShroudGetCurrentSceneIsPVP() or false,
                 isPot = ShroudGetCurrentSceneIsPOT and ShroudGetCurrentSceneIsPOT() or false,
                 dungeon = M.util.nameOr(ShroudGetCurrentDungeonName and ShroudGetCurrentDungeonName(), nil),

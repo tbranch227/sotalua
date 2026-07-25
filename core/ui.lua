@@ -232,10 +232,14 @@ return function(M)
             return ShroudSetColor(w.id, w.kind, hex)
         end
         states = states or {}
-        ShroudSetButtonColor(w.id, ButtonMode.Normal, M.util.hex(states.normal or hex))
-        ShroudSetButtonColor(w.id, ButtonMode.Highlighted, M.util.hex(states.highlighted or M.util.mixHex(hex, "#FFFFFF", 0.25)))
-        ShroudSetButtonColor(w.id, ButtonMode.Pressed, M.util.hex(states.pressed or M.util.mixHex(hex, "#000000", 0.25)))
-        ShroudSetButtonColor(w.id, ButtonMode.Disabled, M.util.hex(states.disabled or M.util.mixHex(hex, "#808080", 0.6)))
+        local normal = M.util.hex(states.normal or hex)
+        local highlighted = M.util.hex(states.highlighted or M.util.mixHex(hex, "#FFFFFF", 0.25))
+        local pressed = M.util.hex(states.pressed or M.util.mixHex(hex, "#000000", 0.25))
+        local disabled = M.util.hex(states.disabled or M.util.mixHex(hex, "#808080", 0.6))
+        ShroudSetButtonColor(w.id, ButtonMode.Normal, normal)
+        ShroudSetButtonColor(w.id, ButtonMode.Highlighted, highlighted)
+        ShroudSetButtonColor(w.id, ButtonMode.Pressed, pressed)
+        ShroudSetButtonColor(w.id, ButtonMode.Disabled, disabled)
         return true
     end
 

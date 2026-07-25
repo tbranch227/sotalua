@@ -67,6 +67,10 @@ return function(M)
         local key = levelName .. "\1" .. body
         local at = now()
 
+        -- info is the default level, so it carries no label; anything louder
+        -- names itself so a player can tell a warning from a status line.
+        local label = levelName == "info" and "" or (levelName:upper() .. ": ")
+
         local entry = state.seen[key]
         if entry then
             entry.count = entry.count + 1
@@ -74,12 +78,12 @@ return function(M)
             local suppressed = entry.count - entry.shown
             entry.reportedAt = at
             entry.shown = entry.count
-            write(string.format("[%s] %s%s (x%d)", state.name, levelName == "info" and "" or levelName:upper() .. ": ", body, suppressed))
+            write(string.format("[%s] %s%s (x%d)", state.name, label, body, suppressed))
             return
         end
 
         state.seen[key] = { count = 1, shown = 1, reportedAt = at }
-        write(string.format("[%s] %s%s", state.name, levelName == "info" and "" or levelName:upper() .. ": ", body))
+        write(string.format("[%s] %s%s", state.name, label, body))
     end
 
     function L.debug(...) emit("debug", L.levels.debug, ...) end

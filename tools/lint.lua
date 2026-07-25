@@ -12,6 +12,17 @@
 -- functions that only assign a global when called, a source scan catches the
 -- common `function Name(...)` and top-level `Name = ...` forms.
 --
+-- KNOWN GAP: the source scan only matches assignments at column 0, because
+-- matching an indented `foo = 1` would flag every reassignment of a local. An
+-- indented global write therefore slips past. That is not fixable without real
+-- scope tracking, which is exactly what luacheck does -- it caught an indented
+-- `_ = target` in target-frame that this file missed. Treat this as the
+-- dependency-free floor and luacheck as the real check:
+--
+--   sudo apt install -y lua-check      (the package is lua-check, not luacheck)
+--
+-- ./run.sh lint runs both when luacheck is present.
+--
 -- Usage: lua tools/lint.lua
 
 local ROOT = (function()

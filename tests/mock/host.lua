@@ -514,8 +514,10 @@ function api.ShroudGetCurrentDungeonOwner() return world.scene.dungeonOwner end
 function api.ShroudGetSceneCap() return world.scene.cap end
 function api.ShroudGetGameTime() return world.gameTime end
 
-function api.ShroudWorldToScreenPoint(x, y, z)
-    -- y comes back in bottom-left space, the opposite of widget space.
+-- World height is deliberately unused: the projection here only needs to put y
+-- in bottom-left screen space, the opposite of widget space, so that callers
+-- who forget to flip it are caught.
+function api.ShroudWorldToScreenPoint(x, _worldY, z)
     return { x = x * 10, y = world.screen.y - (z or 0) * 10, z = 1 }
 end
 

@@ -60,7 +60,9 @@ return function(Core)
         end
     end
 
-    local function renderRunes(target)
+    -- Takes no argument: the rune list comes from the target the host already
+    -- resolved, not from the caller's snapshot.
+    local function renderRunes()
         local runes = env.HAS_TARGET and poll.targetBuffs() or {}
         -- Shortest remaining first: those are the ones about to matter.
         runes = util.sortBy(runes, function(rune)
@@ -83,7 +85,6 @@ return function(Core)
         else
             ui.setText(view.runeOverflow, "")
         end
-        _ = target
     end
 
     local function render()
@@ -118,7 +119,7 @@ return function(Core)
         ui.setText(view.name, util.ellipsize(target.name, 28) .. (target.dead and "  (dead)" or ""))
         ui.setColor(view.name, target.dead and "#909090" or "#FFFFFF")
         renderVitals(target)
-        renderRunes(target)
+        renderRunes()
     end
 
     addon.onStart(function()
