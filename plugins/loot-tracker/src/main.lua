@@ -66,8 +66,14 @@ return function(Core)
         session.baseline = counts
     end
 
+    --- Track gold, but only once the host has actually published the global.
+    --
+    -- ShroudPlayerGold does not exist until the host first pushes it. Treating
+    -- a missing value as 0 would set the opening balance to 0 and then report
+    -- the player's whole purse as session profit the moment it appears.
     local function sampleGold()
-        local gold = tonumber(ShroudPlayerGold) or 0
+        local gold = poll.player().gold
+        if gold == nil then return end
         if not session.goldStart then
             session.goldStart = gold
         end
@@ -92,7 +98,12 @@ return function(Core)
         local elapsed = session.startedAt and ((ShroudTime or 0) - session.startedAt) or 0
         ui.setText(view.heading, string.format("session %s", util.duration(elapsed)))
 
-        local goldText = (session.gold >= 0 and "+" or "") .. util.comma(session.gold)
+        local goldText
+        if session.goldStart == nil then
+            goldText = "waiting"   -- the host has not published the gold total
+        else
+            goldText = (session.gold >= 0 and "+" or "") .. util.comma(session.gold)
+        end
         ui.setText(view.gold, string.format("gold %s   loot value ~%s",
             goldText, util.comma(math.floor(session.value))))
         ui.setColor(view.gold, session.gold < 0 and "#E08A8A" or "#FFD98A")

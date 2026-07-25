@@ -182,6 +182,11 @@ function Host.install()
 end
 
 --- Push the per-frame globals, as the host does each frame.
+--
+-- world.playerGlobalsPending models what a real API 4 client does: the six
+-- ShroudPlayer* values are pushed with a dirty-check and simply do not exist
+-- until the host first publishes them, so an addon can observe a logged-in
+-- character with no position, health, focus or gold available at all.
 function Host.refreshGlobals()
     _G.ShroudLuaApiVersion = world.apiVersion
     _G.ShroudLuaPath = world.luaPath
@@ -192,12 +197,24 @@ function Host.refreshGlobals()
     _G.ShroudServerTime = world.serverTime
     _G.ShroudMouseX = world.mouse.x
     _G.ShroudMouseY = world.mouse.y
+    if world.playerGlobalsPending then
+        _G.ShroudPlayerX, _G.ShroudPlayerY, _G.ShroudPlayerZ = nil, nil, nil
+        _G.ShroudPlayerCurrentHealth, _G.ShroudPlayerCurrentFocus = nil, nil
+        _G.ShroudPlayerGold = nil
+        return
+    end
     _G.ShroudPlayerX = world.player.x
     _G.ShroudPlayerY = world.player.y
     _G.ShroudPlayerZ = world.player.z
     _G.ShroudPlayerCurrentHealth = world.player.health
     _G.ShroudPlayerCurrentFocus = world.player.focus
     _G.ShroudPlayerGold = world.player.gold
+end
+
+--- Start publishing the per-frame player globals, as the host eventually does.
+function Host.publishPlayerGlobals()
+    world.playerGlobalsPending = false
+    Host.refreshGlobals()
 end
 
 ----------------------------------------------------------------------

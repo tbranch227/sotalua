@@ -45,8 +45,7 @@ describe("plugin lifecycle", function()
     for _, slug in ipairs(PLUGINS) do
         it(slug .. " survives load, play, scene change, logout and disable", function()
             local M = H.bootstrap({ world = populatedWorld })
-            local factory = dofile(H.root .. "plugins/" .. slug .. "/src/main.lua")
-            factory(M)
+            H.plugin(slug, M)
             H.installHandlers(M)
 
             H.host.start()
@@ -88,8 +87,7 @@ describe("plugin lifecycle", function()
             -- No target, no party, no pet, no buffs, no inventory: every getter
             -- returns its sentinel. This is the state at a fresh login.
             local M = H.bootstrap()
-            local factory = dofile(H.root .. "plugins/" .. slug .. "/src/main.lua")
-            factory(M)
+            H.plugin(slug, M)
             H.installHandlers(M)
 
             H.host.start()
@@ -141,7 +139,7 @@ describe("target-frame", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/target-frame/src/main.lua")(M)
+        plugin = H.plugin("target-frame", M)
         H.installHandlers(M)
         H.host.start()
     end)
@@ -195,7 +193,7 @@ describe("buff-bars", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/buff-bars/src/main.lua")(M)
+        plugin = H.plugin("buff-bars", M)
         H.installHandlers(M)
         H.host.start()
         H.host.frames(20, 1 / 30)
@@ -229,7 +227,7 @@ describe("party-frames", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/party-frames/src/main.lua")(M)
+        plugin = H.plugin("party-frames", M)
         H.installHandlers(M)
         H.host.start()
     end)
@@ -254,7 +252,7 @@ describe("xp-tracker", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/xp-tracker/src/main.lua")(M)
+        plugin = H.plugin("xp-tracker", M)
         H.installHandlers(M)
         H.host.start()
     end)
@@ -292,7 +290,7 @@ describe("loot-tracker", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/loot-tracker/src/main.lua")(M)
+        plugin = H.plugin("loot-tracker", M)
         H.installHandlers(M)
         H.host.start()
     end)
@@ -329,11 +327,114 @@ describe("loot-tracker", function()
     end)
 end)
 
+describe("late per-frame player globals", function()
+    -- A real API 4 client published none of ShroudPlayerX/Y/Z, CurrentHealth,
+    -- CurrentFocus or Gold while the character stood still. Anything that reads
+    -- them as `x or 0` produces a confident wrong answer.
+    after_each(H.teardown)
+
+    it("poll.player reports which globals are absent", function()
+        local M = H.bootstrap({ world = function(w) w.playerGlobalsPending = true end })
+        local player = M.poll.player()
+        assert_that.is_false(player.available)
+        assert_that.is_false(player.hasPosition)
+        assert_that.nil_(player.gold)
+        assert_that.same({ "x", "y", "z", "health", "focus", "gold" }, player.missing)
+
+        H.host.publishPlayerGlobals()
+        local live = M.poll.player()
+        assert_that.is_true(live.available)
+        assert_that.equal(1234, live.gold)
+    end)
+
+    it("loot-tracker does not report the whole purse as profit", function()
+        local M = H.bootstrap({ world = function(w)
+            populatedWorld(w)
+            w.playerGlobalsPending = true
+        end })
+        local plugin = H.plugin("loot-tracker", M)
+        H.installHandlers(M)
+        H.host.start()
+        H.host.frames(240, 1 / 30)     -- eight seconds with no gold global
+
+        assert_that.nil_(plugin.session.goldStart,
+            "a baseline must not be taken from a missing global")
+
+        H.host.publishPlayerGlobals()  -- the host finally pushes 1234 gold
+        H.host.frames(240, 1 / 30)
+
+        assert_that.equal(1234, plugin.session.goldStart)
+        assert_that.equal(0, plugin.session.gold,
+            "gold appearing is not income")
+
+        H.host.world.player.gold = 1334
+        H.host.publishPlayerGlobals()
+        H.host.frames(240, 1 / 30)
+        assert_that.equal(100, plugin.session.gold)
+    end)
+
+    it("scene-info says the position is pending rather than showing 0,0,0", function()
+        local M = H.bootstrap({ world = function(w)
+            populatedWorld(w)
+            w.playerGlobalsPending = true
+        end })
+        local plugin = H.plugin("scene-info", M)
+        H.installHandlers(M)
+        H.host.start()
+        plugin.render()
+
+        assert_that.is_true(H.host.hasText("position pending"))
+        assert_that.is_false(H.host.hasText("0, 0, 0"))
+    end)
+
+    it("session-log adopts the first real gold reading as its baseline", function()
+        local M = H.bootstrap({ world = function(w)
+            populatedWorld(w)
+            w.playerGlobalsPending = true
+        end })
+        local plugin = H.plugin("session-log", M)
+        H.installHandlers(M)
+        H.host.start()
+        assert_that.nil_(plugin.current.goldStart)
+
+        H.host.publishPlayerGlobals()
+        plugin.render()
+        assert_that.equal(1234, plugin.current.goldStart)
+
+        H.host.world.player.gold = 1000   -- spent some
+        H.host.publishPlayerGlobals()
+        plugin.closeSession()
+        local history = M.settings.get("sessions") or {}
+        assert_that.equal(-234, history[#history].gold)
+    end)
+
+    it("every plugin runs a full lifecycle with the globals never published", function()
+        for _, slug in ipairs(PLUGINS) do
+            local M = H.bootstrap({ world = function(w)
+                populatedWorld(w)
+                w.playerGlobalsPending = true
+            end })
+            H.plugin(slug, M)
+            H.installHandlers(M)
+            H.host.start()
+            H.host.frames(90, 1 / 30)
+            H.host.logout()
+            H.host.disable()
+
+            for _, line in ipairs(H.host.console()) do
+                assert_that.falsy(line:find("ERROR", 1, true),
+                    slug .. " errored without the player globals: " .. line)
+            end
+            H.teardown()
+        end
+    end)
+end)
+
 describe("world-clock", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/world-clock/src/main.lua")(M)
+        plugin = H.plugin("world-clock", M)
         H.installHandlers(M)
         H.host.start()
     end)
@@ -366,7 +467,7 @@ describe("scene-info", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/scene-info/src/main.lua")(M)
+        plugin = H.plugin("scene-info", M)
         H.installHandlers(M)
         H.host.start()
     end)
@@ -400,7 +501,7 @@ describe("session-log", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/session-log/src/main.lua")(M)
+        plugin = H.plugin("session-log", M)
         H.installHandlers(M)
         H.host.start()
     end)
@@ -437,7 +538,7 @@ describe("perf-monitor", function()
     local M, plugin
     before_each(function()
         M = H.bootstrap({ world = populatedWorld })
-        plugin = dofile(H.root .. "plugins/perf-monitor/src/main.lua")(M)
+        plugin = H.plugin("perf-monitor", M)
         H.installHandlers(M)
         H.host.start()
     end)
@@ -464,7 +565,7 @@ describe("addon-inspector", function()
 
     it("reports what is under the cursor", function()
         local M = H.bootstrap({ world = populatedWorld })
-        dofile(H.root .. "plugins/addon-inspector/src/main.lua")(M)
+        H.plugin("addon-inspector", M)
         H.installHandlers(M)
         H.host.start()
         H.host.frames(20, 1 / 30)
@@ -475,7 +576,7 @@ describe("addon-inspector", function()
 
     it("refuses to run on a client older than API 2", function()
         local M = H.bootstrap({ apiVersion = 1, world = populatedWorld })
-        dofile(H.root .. "plugins/addon-inspector/src/main.lua")(M)
+        H.plugin("addon-inspector", M)
         H.installHandlers(M)
         H.host.start()
 

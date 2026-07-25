@@ -77,8 +77,13 @@ return function(Core)
 
         local compass, degrees = heading()
         if view.position then
-            ui.setText(view.position, string.format("%s %d deg   %.0f, %.0f, %.0f",
-                compass, degrees, ShroudPlayerX or 0, ShroudPlayerY or 0, ShroudPlayerZ or 0))
+            -- The position globals are pushed lazily and may not exist yet;
+            -- "0, 0, 0" would look like a real location at the world origin.
+            local player = poll.player()
+            local coords = player.hasPosition
+                and string.format("%.0f, %.0f, %.0f", player.x, player.y, player.z)
+                or "position pending"
+            ui.setText(view.position, string.format("%s %d deg   %s", compass, degrees, coords))
         else
             ui.setText(view.compass, string.format("facing %s (%d deg)", compass, degrees))
         end
@@ -124,9 +129,15 @@ return function(Core)
 
     addon.command("coords", function()
         local compass, degrees = heading()
+        local player = poll.player()
+        local scene = ShroudGetCurrentSceneName and ShroudGetCurrentSceneName() or "?"
+        if not player.hasPosition then
+            log.say(string.format("facing %s (%d deg) in %s; position not published yet"
+                .. " (missing: %s)", compass, degrees, scene, table.concat(player.missing, ", ")))
+            return
+        end
         log.say(string.format("%.2f, %.2f, %.2f facing %s (%d deg) in %s",
-            ShroudPlayerX or 0, ShroudPlayerY or 0, ShroudPlayerZ or 0,
-            compass, degrees, ShroudGetCurrentSceneName and ShroudGetCurrentSceneName() or "?"))
+            player.x, player.y, player.z, compass, degrees, scene))
     end)
 
     addon.command("where", function()

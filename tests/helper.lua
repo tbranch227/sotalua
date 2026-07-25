@@ -25,11 +25,12 @@ function Helper.bootstrap(opts)
     opts = opts or {}
 
     Helper.host.install()
-    if opts.apiVersion then
-        Helper.host.world.apiVersion = opts.apiVersion
-        Helper.host.refreshGlobals()
-    end
+    if opts.apiVersion then Helper.host.world.apiVersion = opts.apiVersion end
     if opts.world then opts.world(Helper.host.world) end
+    -- Re-push after the fixture has run: install() already published one set of
+    -- globals, so a fixture that changes the API version or withholds the
+    -- per-frame player values would otherwise have no effect.
+    Helper.host.refreshGlobals()
 
     local M = {}
     for _, name in ipairs(MODULES) do
@@ -61,6 +62,12 @@ function Helper.installHandlers(M)
     for name, fn in pairs(M.addon.handlers()) do
         _G[name] = fn
     end
+end
+
+--- Instantiate a plugin against an already-bootstrapped core table.
+function Helper.plugin(slug, M)
+    local factory = dofile(ROOT .. "plugins/" .. slug .. "/src/main.lua")
+    return factory(M)
 end
 
 --- Load a plugin's source the way the bundler does and wire up its callbacks.

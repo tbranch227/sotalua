@@ -17,8 +17,32 @@ return function(M)
     E.HAS_MOUSE = E.API >= 2
     E.HAS_ICONS = E.API >= 3
 
-    E.LUA_PATH = ShroudLuaPath or ""
-    E.DATA_PATH = ShroudDataPath or ""
+    -- Read live, not snapshotted.
+    --
+    -- The reference says the set-once constants are written before any addon
+    -- file runs, and ShroudLuaApiVersion does behave that way. ShroudLuaPath
+    -- does not: on a real client it was still empty while the file body ran and
+    -- only populated later, which turned a snapshot into "" and made a path
+    -- built from it land at the filesystem root. Reading at call time costs a
+    -- global lookup and is correct whenever the host gets round to setting it.
+    function E.luaPath()
+        return ShroudLuaPath or ""
+    end
+
+    function E.dataPath()
+        return ShroudDataPath or ""
+    end
+
+    --- Join a filename onto the addon Lua folder, picking the right separator.
+    -- Returns nil when the host has not published the path yet, so callers can
+    -- report that rather than writing to an accidental absolute path.
+    function E.luaFile(name)
+        local base = E.luaPath()
+        if base == "" then return nil end
+        local separator = base:find("\\", 1, true) and "\\" or "/"
+        if base:sub(-1) == separator then return base .. name end
+        return base .. separator .. name
+    end
 
     local state = {
         name = "addon",

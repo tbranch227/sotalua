@@ -278,6 +278,40 @@ return function(M)
         end)
     end
 
+    --- The per-frame player globals, with absence reported rather than hidden.
+    --
+    -- ShroudPlayerX/Y/Z, ShroudPlayerCurrentHealth, ShroudPlayerCurrentFocus
+    -- and ShroudPlayerGold are documented as refreshed every frame, but on a
+    -- real API 4 client none of them existed at all while the character stood
+    -- still: the host pushes them with a dirty-check and had not pushed them
+    -- yet. Reading them as `x or 0` is therefore wrong in a way that matters --
+    -- a tracker that takes 0 as its opening gold balance reports the player's
+    -- entire purse as profit the moment the global appears.
+    --
+    -- Fields are nil when unavailable. `available` is true only when every one
+    -- is live; `missing` names the absent ones.
+    function P.player()
+        local fields = {
+            x = ShroudPlayerX,
+            y = ShroudPlayerY,
+            z = ShroudPlayerZ,
+            health = ShroudPlayerCurrentHealth,
+            focus = ShroudPlayerCurrentFocus,
+            gold = ShroudPlayerGold,
+        }
+        local missing = {}
+        for _, name in ipairs({ "x", "y", "z", "health", "focus", "gold" }) do
+            if type(fields[name]) ~= "number" then
+                fields[name] = nil
+                missing[#missing + 1] = name
+            end
+        end
+        fields.missing = missing
+        fields.available = #missing == 0
+        fields.hasPosition = fields.x ~= nil and fields.y ~= nil and fields.z ~= nil
+        return fields
+    end
+
     function P.pet()
         return frameCache("pet", function()
             if not ShroudGetPetInfo then return nil end

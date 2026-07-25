@@ -69,7 +69,10 @@ return function(Core)
             scenes = util.shallowCopy(current.scenes),
             adventurer = math.max(adv - (current.xpStart and current.xpStart.adv or adv), 0),
             producer = math.max(prod - (current.xpStart and current.xpStart.prod or prod), 0),
-            gold = (tonumber(ShroudPlayerGold) or 0) - (current.goldStart or 0),
+            -- Both sides must be real readings, or the delta is meaningless:
+            -- ShroudPlayerGold is absent until the host first pushes it.
+            gold = (Core.poll.player().gold and current.goldStart)
+                and (Core.poll.player().gold - current.goldStart) or 0,
             character = ShroudGetPlayerName and ShroudGetPlayerName() or "?",
         }
 
@@ -83,7 +86,8 @@ return function(Core)
         current.startedAt = ShroudTime or 0
         current.startedWall = ShroudServerTime
         current.xpStart = { adv = adv, prod = prod }
-        current.goldStart = tonumber(ShroudPlayerGold) or 0
+        -- nil, not 0, when the host has not published gold yet.
+        current.goldStart = Core.poll.player().gold
         current.scenes, current.sceneSeen = {}, {}
     end
 
@@ -94,12 +98,22 @@ return function(Core)
         local adv, prod = xpTotal()
         local gainedAdv = current.xpStart and math.max(adv - current.xpStart.adv, 0) or 0
         local gainedProd = current.xpStart and math.max(prod - current.xpStart.prod, 0) or 0
-        local gold = (tonumber(ShroudPlayerGold) or 0) - (current.goldStart or 0)
+
+        -- Late-arriving gold: adopt the first real reading as the baseline
+        -- rather than reporting the whole purse as a gain.
+        local liveGold = Core.poll.player().gold
+        if current.goldStart == nil and liveGold ~= nil then
+            current.goldStart = liveGold
+        end
+        local goldText = "--"
+        if liveGold and current.goldStart then
+            local gold = liveGold - current.goldStart
+            goldText = (gold >= 0 and "+" or "") .. util.comma(gold)
+        end
 
         ui.setText(view.duration, "this session " .. util.duration(elapsed))
-        ui.setText(view.earned, string.format("%s adv  %s prod  %s%s gold",
-            util.short(gainedAdv), util.short(gainedProd),
-            gold >= 0 and "+" or "", util.comma(gold)))
+        ui.setText(view.earned, string.format("%s adv  %s prod  %s gold",
+            util.short(gainedAdv), util.short(gainedProd), goldText))
         ui.setText(view.scenes, string.format("%d scene%s: %s",
             #current.scenes, #current.scenes == 1 and "" or "s",
             util.ellipsize(table.concat(current.scenes, ", "), 44)))
@@ -116,7 +130,8 @@ return function(Core)
         current.startedAt = ShroudTime or 0
         current.startedWall = ShroudServerTime
         current.xpStart = { adv = adv, prod = prod }
-        current.goldStart = tonumber(ShroudPlayerGold) or 0
+        -- nil, not 0, when the host has not published gold yet.
+        current.goldStart = Core.poll.player().gold
         noteScene(ShroudGetCurrentSceneName and ShroudGetCurrentSceneName() or nil)
 
         if not Core.settings.get("showWindow") then return end
