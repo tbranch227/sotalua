@@ -1,0 +1,62 @@
+Lua Addons · SotA Lua Addons
+
+    SotALua Addons
+
+  ☰
+
+    Home
+    Guide
+    API Reference
+    Host internals
+    Agent reference
+    Addon store ↗
+
+  SotA
+
+  Lua Addons
+
+  Write add-ons for Shroud of the Avatar in Lua: read your stats and surroundings,
+  draw your own on-screen panels, react to combat and chat, and save settings between sessions.
+
+  ReferenceAPI Reference
+Complete Shroud* function reference
+Open →Start hereGuide
+Write, install, and share addons
+Open →AdvancedHost internals
+How the Lua runtime is wired
+Open →For AI agentsAgent reference
+Token-dense API map for AI coding agents
+Open →
+  CommunityAddon store
+Browse and submit reviewed community addons
+Visit ↗
+
+  What an addon can do
+
+  An addon is one or more .lua files the client loads at startup. It runs in a
+  sandbox: it can read game state and draw UI, but it cannot touch the network, run external
+  programs, or reach files outside its own folder. Addons are disabled when first installed and you
+  turn them on in the addon manager, so nothing you download runs until you allow it.
+
+  A first addon
+
+  Create Lua/hello.lua in your game folder, enable it in the addon manager, and it
+  greets you on load and shows a small panel that tracks your health.
+
+  local labelId
+
+function ShroudOnStart()
+    ShroudConsoleLog("Hello, " .. ShroudGetPlayerName())
+    local panel = ShroudUIPanel(20, 20, 200, 44)
+    labelId = ShroudUIText("HP: " .. ShroudPlayerCurrentHealth, 18, 30, 30, 180, 26)
+    ShroudSetTextParent(labelId, panel)
+end
+
+function ShroudOnUpdate()
+    ShroudModifyText(labelId, "HP: " .. ShroudPlayerCurrentHealth)
+end
+
+  From here, read the Guide to install, package, and share addons, and
+  the API Reference for every function you can call.
+
+Shroud of the Avatar · community Lua addon documentation. Generated from the client bindings. Docs home · Addon store

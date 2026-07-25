@@ -1,0 +1,9 @@
+{
+  "slug": "loot-tracker",
+  "name": "Loot Tracker",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Tracks what entered and left your bags this session by diffing inventory on a timer, along with gold gained and the estimated value of the haul.",
+  "minApiVersion": 1,
+  "permissions": []
+}

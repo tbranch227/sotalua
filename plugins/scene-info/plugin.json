@@ -1,0 +1,9 @@
+{
+  "slug": "scene-info",
+  "name": "Scene Info",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Where you are and what the rules are: scene name, level and skill caps, PvP and player-owned-town flags, dungeon owner, a compass corrected for scene orientation, and your coordinates.",
+  "minApiVersion": 1,
+  "permissions": []
+}

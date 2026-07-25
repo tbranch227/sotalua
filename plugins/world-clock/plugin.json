@@ -1,0 +1,9 @@
+{
+  "slug": "world-clock",
+  "name": "World Clock",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "In-game date, time of day and season alongside server time, with a countdown to the next period of day.",
+  "minApiVersion": 1,
+  "permissions": []
+}

@@ -1,0 +1,9 @@
+{
+  "slug": "api-probe",
+  "name": "API Probe",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Dumps live game state to chat: stats, buffs, target, party, scene, inventory and the client's Lua API version. A development aid for addon authors.",
+  "minApiVersion": 1,
+  "permissions": []
+}

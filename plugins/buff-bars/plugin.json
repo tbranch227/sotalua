@@ -1,0 +1,9 @@
+{
+  "slug": "buff-bars",
+  "name": "Buff Bars",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Timer rows for your active buffs and debuffs, and your pet's, sorted by time remaining with real in-game skill icons on API 3 clients.",
+  "minApiVersion": 1,
+  "permissions": []
+}

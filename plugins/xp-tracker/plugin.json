@@ -1,0 +1,9 @@
+{
+  "slug": "xp-tracker",
+  "name": "XP Tracker",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Session adventurer and producer experience with an hourly rate, pooled versus total, and a clear warning while experience is being attenuated.",
+  "minApiVersion": 1,
+  "permissions": []
+}

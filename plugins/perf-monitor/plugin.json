@@ -1,0 +1,9 @@
+{
+  "slug": "perf-monitor",
+  "name": "Perf Monitor",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Frame time and hitch monitor built on the unclamped wall-clock delta, plus a managed-heap readout and an optional incremental GC assist.",
+  "minApiVersion": 1,
+  "permissions": []
+}

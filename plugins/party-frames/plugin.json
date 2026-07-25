@@ -1,0 +1,9 @@
+{
+  "slug": "party-frames",
+  "name": "Party Frames",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Compact health and focus bars for every party member, with out-of-scene members dimmed and a low-health warning colour.",
+  "minApiVersion": 1,
+  "permissions": []
+}

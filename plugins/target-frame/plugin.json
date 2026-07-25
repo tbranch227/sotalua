@@ -1,0 +1,9 @@
+{
+  "slug": "target-frame",
+  "name": "Target Frame",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "A compact frame for your current target: name, health and focus bars, dead and hidden-health states, and the target's active runes with time remaining.",
+  "minApiVersion": 1,
+  "permissions": []
+}

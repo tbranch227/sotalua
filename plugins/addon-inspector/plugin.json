@@ -1,0 +1,9 @@
+{
+  "slug": "addon-inspector",
+  "name": "Addon Inspector",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Shows the name, kind, id and tooltip text of whatever is under your cursor, with a pin key and a copyable text field. A development aid for addon authors.",
+  "minApiVersion": 2,
+  "permissions": []
+}

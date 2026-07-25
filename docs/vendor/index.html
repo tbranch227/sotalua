@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lua Addons &middot; SotA Lua Addons</title>
+<meta name="robots" content="index,follow">
+<meta name="description" content="Documentation for writing Lua addons for Shroud of the Avatar.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html" style="text-decoration:none">
+    <span class="crest">SotA</span><span class="title">Lua <b>Addons</b></span>
+  </a>
+  <button class="menu-toggle" aria-label="Toggle navigation">&#9776;</button>
+  <nav class="topnav">
+    <a href="index.html" class="active">Home</a>
+    <a href="guide.html">Guide</a>
+    <a href="reference.html">API Reference</a>
+    <a href="internals.html">Host internals</a>
+    <a href="agent.html">Agent reference</a>
+    <a href="https://addons.catnipgames.net" target="_blank" rel="noopener">Addon store &#8599;</a>
+  </nav>
+</header>
+<section class="hero">
+  <div class="crest-lg">SotA</div>
+  <h1>Lua <span class="accent">Addons</span></h1>
+  <p class="tag">Write add-ons for Shroud of the Avatar in Lua: read your stats and surroundings,
+  draw your own on-screen panels, react to combat and chat, and save settings between sessions.</p>
+</section>
+<div class="cards">
+  <a class="card" href="reference.html"><span class="k">Reference</span><h3>API Reference</h3><p>Complete Shroud* function reference</p><span class="go">Open &rarr;</span></a><a class="card" href="guide.html"><span class="k">Start here</span><h3>Guide</h3><p>Write, install, and share addons</p><span class="go">Open &rarr;</span></a><a class="card" href="internals.html"><span class="k">Advanced</span><h3>Host internals</h3><p>How the Lua runtime is wired</p><span class="go">Open &rarr;</span></a><a class="card" href="agent.html"><span class="k">For AI agents</span><h3>Agent reference</h3><p>Token-dense API map for AI coding agents</p><span class="go">Open &rarr;</span></a>
+  <a class="card" href="https://addons.catnipgames.net" target="_blank" rel="noopener"><span class="k">Community</span><h3>Addon store</h3><p>Browse and submit reviewed community addons</p><span class="go">Visit &#8599;</span></a>
+</div>
+<div class="landing-body prose">
+  <h2 id="what">What an addon can do</h2>
+  <p>An addon is one or more <code>.lua</code> files the client loads at startup. It runs in a
+  sandbox: it can read game state and draw UI, but it cannot touch the network, run external
+  programs, or reach files outside its own folder. Addons are disabled when first installed and you
+  turn them on in the addon manager, so nothing you download runs until you allow it.</p>
+  <h2 id="hello">A first addon</h2>
+  <p>Create <code>Lua/hello.lua</code> in your game folder, enable it in the addon manager, and it
+  greets you on load and shows a small panel that tracks your health.</p>
+  <pre><code>local labelId
+
+function ShroudOnStart()
+    ShroudConsoleLog("Hello, " .. ShroudGetPlayerName())
+    local panel = ShroudUIPanel(20, 20, 200, 44)
+    labelId = ShroudUIText("HP: " .. ShroudPlayerCurrentHealth, 18, 30, 30, 180, 26)
+    ShroudSetTextParent(labelId, panel)
+end
+
+function ShroudOnUpdate()
+    ShroudModifyText(labelId, "HP: " .. ShroudPlayerCurrentHealth)
+end</code></pre>
+  <p>From here, read the <a href="guide.html">Guide</a> to install, package, and share addons, and
+  the <a href="reference.html">API Reference</a> for every function you can call.</p>
+</div>
+<footer class="site-footer">Shroud of the Avatar &middot; community Lua addon documentation. Generated from the client bindings. <a href="index.html">Docs home</a> &middot; <a href="https://addons.catnipgames.net" target="_blank" rel="noopener">Addon store</a></footer>
+<script>window.__SEARCH_INDEX=[];</script>
+<script src="docs.js"></script>
+</body>
+</html>

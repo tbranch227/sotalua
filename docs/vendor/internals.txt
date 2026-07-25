@@ -1,0 +1,339 @@
+Host internals · SotA Lua Addons
+
+    SotALua Addons
+
+  ☰
+
+    Home
+    Guide
+    API Reference
+    Host internals
+    Agent reference
+    Addon store ↗
+
+  On this page
+
+Host wiring
+Garbage collection API (#914)
+Frame timing globals
+Ink conversation variable bridge (#745)
+Target API (#746)
+Under-mouse API (#1031)
+Tests
+
+Lua addon system (MoonSharp)¶
+
+Player-facing docs: the authoring guide (how to write/install addons,
+callbacks, the sandbox, and the migration notes for existing addons) and the
+API reference (every Shroud* function). This page is the host-internals doc.
+
+The client hosts player-written Lua addons via MoonSharp (vendored C# source,
+UnityProject/Assets/Plugins/MoonSharp/). This page covers the host wiring, the
+garbage-collection / frame-timing API added for tracker #914, and the current-target
+API added for tracker #746.
+
+Host wiring¶
+
+Host: UnityProject/Assets/Scripts/Lua/LuaManager.cs (MonoBehaviour).
+
+One shared MoonSharp.Interpreter.Script (m_bootScript, CoreModules.Preset_Complete) holds
+  every enabled addon; addons are *.lua files in the user data Lua/ folder.
+
+Only enabled addons execute. A disabled addon's body is never run into m_bootScript at load
+  (ForceReload / LoadPackagedScript gate the DoString on the pref-derived enabled state, #1137),
+  so a disabled addon is fully inert and contributes no globals — nothing it defines is reachable
+  (including via /lua <function>) until it is enabled. Enabling runs the body: EnableScript for a
+  flat addon, ForceReload for a package. The addon still gets a ScriptEntry while disabled so it
+  lists in the manager.
+
+Callbacks (ShroudOnUpdate, ShroudOnGUI, ShroudOnStart, mouse/scene/sound hooks, …) are
+  detected by re-running each file in a throwaway Script and stored per addon (ScriptEntry);
+  LuaManager.Update() drives ShroudOnUpdate for each enabled addon every frame.
+
+The Shroud* API surface is registered in InitAPICalls() and friends; per-frame globals
+  (player position, health, time values) are pushed in SetGlobalVariables().
+
+Callbacks run under an execution watchdog (commit 02261f6626): a callback that runs past
+  its wall-clock budget (1 s for a normal callback, 5 s for load-time / ShroudOnStart) is
+  aborted with a MoonSharpWatchdogException — which derives from System.Exception, not
+  InterpreterException, so a pcall-wrapped infinite loop cannot swallow it. An addon that
+  errors repeatedly (≥8 times in 10 s) is auto-disabled in memory until /lua reload. See the
+  authoring guide's sandbox section for the player-facing summary.
+
+Garbage collection API (#914)¶
+
+MoonSharp has no Lua-side GC — Lua values are .NET objects collected by Unity's (Boehm) GC.
+Stock MoonSharp mapped collectgarbage("collect") to a full blocking collect (measured
+140-190ms on a live-sized heap) and returned nil for every other mode, so addons could neither
+measure memory nor collect incrementally.
+
+LuaGcApi (UnityProject/Assets/Scripts/Lua/LuaGcApi.cs) overrides collectgarbage in every
+Script the host creates:
+
+Call
+Behavior
+Returns
+
+collectgarbage() / ("collect") / ("restart")
+Full blocking collect (unchanged — still expensive, use "step" instead)
+0
+
+collectgarbage("count")
+Managed heap size
+KB, bytes % 1024 (two values, Lua 5.2 style)
+
+collectgarbage("step"[, ms])
+Time-budgeted incremental collect via GarbageCollector.CollectIncremental. Optional arg = millisecond budget (default 3, clamped 0.1-50). Lua's KB step arg has no CLR mapping. No-op returning true if incremental GC is unavailable — never falls back to a blocking collect.
+true when the collection cycle is complete
+
+collectgarbage("isrunning")
+GC enabled check
+boolean
+
+any other mode ("stop", "setpause", "setstepmul", …)
+No-op — addons cannot disable the client-wide GC
+nil
+
+The project ships with Unity incremental GC enabled (gcIncremental: 1), so automatic
+collections are already time-sliced; "step" lets an addon voluntarily donate extra budget
+(e.g. during loading screens) instead of forcing a stall with "collect".
+
+Frame timing globals¶
+
+ShroudDeltaTime — Time.deltaTime, clamped by the project's Maximum Allowed Timestep
+  (0.1s, ProjectSettings/TimeManager.asset). During any stall longer than 100ms it saturates
+  at ~0.1 — correct for pacing animation, wrong for measuring stalls. Kept clamped for
+  back-compat.
+
+ShroudRealDeltaTime (new, #914) — unclamped wall-clock frame delta
+  (Time.realtimeSinceStartupAsDouble difference), shows the true length of long frames.
+  Use this for addon-side hitch diagnostics.
+
+Both are pushed once per frame after addon callbacks run, so a stall in frame N is visible to
+addons one frame later.
+
+Ink conversation variable bridge (#745)¶
+
+Player-authored custom-NPC Ink scripts persist per-character state through their
+saveVariable(varName)/loadVariable(varName) external functions
+(UnityProject/Assets/Scripts/UIControllers/CustomNpc/CustomNpcStoryUI.cs), which read/write
+local PlayerPrefs under the key <PhotonCharacterName>.Ink_<varName> (the character's full
+name, "First" or "First Last"). LuaInkApi
+(UnityProject/Assets/Scripts/Lua/LuaInkApi.cs) exposes the same key space to addons,
+registered from InitAPICalls() with a character-name provider:
+
+Call
+Returns
+Behavior
+
+ShroudLoadInkVariable(varName)
+string or nil
+The stored string, or nil when unsaved / no character / bad varName. A saved "" returns "", not nil.
+
+ShroudSaveInkVariable(varName, value)
+boolean
+Stores string / number / boolean; false (no write) for any other type, a string over 8192 chars, NaN/Inf, bad varName, or no character.
+
+ShroudHasInkVariable(varName)
+boolean
+Whether a value is stored.
+
+ShroudDeleteInkVariable(varName)
+boolean
+Removes the value; true only if one existed. Safe: Ink's loadVariable re-seeds the script default when the key is missing.
+
+varName must be a non-empty Lua string (no coercion — a numeric 5 never aliases the key
+...Ink_5). Value formatting matches what Ink's loadVariable int.TryParse round-trips:
+integral numbers store without a decimal point (42 / 42.0 → "42"), non-integral store
+invariant (3.5 → "3.5", which Ink reads back as a string), booleans store "1"/"0" (the
+embedded Ink runtime has no bool type; int truthiness is its idiom).
+
+Synchronization contract: the bridge only touches PlayerPrefs, never a running story's
+in-memory variablesState. A conversation observes a Lua write at its next
+loadVariable(var) call, and an addon observes a story write after the story's
+saveVariable(var) — save/load are the explicit sync points, there are no notifications
+(poll in ShroudOnUpdate if reacting matters).
+
+Gotchas:
+
+Ink's loadVariable treats the stored literal string "null" as "never saved" and resets
+  the variable to the script default; the Lua side (HasKey-based) reads it back faithfully.
+  Avoid storing "null" for values an Ink script must read.
+
+Ink's loadVariable seeds the script's default into PlayerPrefs on first call, so
+  ShroudHasInkVariable can be true for a variable a conversation merely loaded.
+
+Keys are per character name and device-local (PlayerPrefs): renames orphan data,
+  same-named characters on one machine share, other machines see nothing.
+
+Writes are not flushed per call (parity with the Ink side; Unity flushes on clean quit).
+
+Target API (#746)¶
+
+Functions exposing the player's current target, for buff monitors and similar addons. The
+target resolves exactly like the stock target frame: the locked (selected) target if there is
+one, otherwise the closest/best target, and only combatants count. Implementations live in
+LuaManager.cs (#region Target API); the pure decision logic (debuff mapping, hidden-health
+clamp, stat policy) is in UnityProject/Assets/Scripts/Lua/LuaTargetLogic.cs so EditMode tests
+can pin it.
+
+Function
+Returns
+No target
+
+ShroudHasTarget()
+bool
+false
+
+ShroudGetTargetName()
+string
+"None"
+
+ShroudGetTargetId()
+int — session-local id, stable while the object lives; use it to detect target switches. Not persistent across sessions.
+-1
+
+ShroudIsTargetDead()
+bool
+false
+
+ShroudIsTargetHealthHidden()
+bool — true while the target hides its health (see below)
+false
+
+ShroudGetTargetCurrentHealth()
+int
+-1
+
+ShroudGetTargetMaxHealth()
+int
+-1
+
+ShroudGetTargetCurrentFocus() / ShroudGetTargetMaxFocus()
+int
+-1
+
+ShroudGetTargetBuff()
+List<RuneEffects> (same shape as ShroudGetPlayerBuff)
+nil
+
+ShroudGetTargetBuffCount()
+int
+0
+
+ShroudGetTargetBuffName(i) / ShroudGetTargetBuffDescription(i)
+string (0-based index)
+"Invalid"
+
+ShroudGetTargetBuffTimeRemaining(i)
+float seconds
+-1
+
+ShroudGetTargetStatValueByNumber(n) / ShroudGetTargetStatValueByName(s)
+float
+InvalidStatResult
+
+Behavior rules (all mirror what the stock UI already reveals — addons can never show more):
+
+Hidden health: some creatures hide their health until they drop below half. While hidden,
+  ShroudGetTargetCurrentHealth() reports the max value (exactly like the target frame's full
+  bar) and ShroudIsTargetHealthHidden() returns true so an addon can render a "?" instead.
+
+Player targets are vitals-only: when the target is another player, the stat functions
+  return InvalidStatResult for everything except CurrentHealth, Health, CurrentFocus,
+  and Focus. NPC/creature targets expose the full stat set minus the same hidden list the
+  player stat functions use (virtues, GM/AI flags).
+
+RuneEffects gained fields (also on ShroudGetPlayerBuff/ShroudGetPetBuff results):
+  RuneId (int skill id), IsDebuff (bool, hostile-disposition runes), StackCount (number of
+  grouped effect entries under the rune — a rune applying several effect components counts each
+  one, so treat it as an upper bound on true stacks).
+
+Feature detection: ShroudLuaApiVersion¶
+
+Builds with the target API define the global ShroudLuaApiVersion (a plain number; bumped when
+the API surface grows — 1 = target API #746, 2 = under-mouse API #1031). It is set at Script
+creation, before addon files run, so reading it at addon top level is safe everywhere:
+
+if ShroudLuaApiVersion and ShroudLuaApiVersion >= 1 then hasTargetApi = true end
+if ShroudLuaApiVersion and ShroudLuaApiVersion >= 2 then hasUnderMouseApi = true end
+
+Calling Shroud* functions at top level is still unsupported (they register after addon files
+load); call them only inside callbacks like ShroudOnUpdate.
+
+Perf notes¶
+
+Every call resolves the target and every buff call snapshots the effect array (an allocation).
+Prefer one ShroudGetTargetBuff() per ShroudOnUpdate over per-index Count/Name/Time
+loops, and see collectgarbage("step") above for donating GC budget.
+
+Under-mouse API (#1031)¶
+
+Functions exposing whatever is under the mouse cursor — a world NPC or player, a world item or
+container, a placed decoration, an inventory/vendor item, or a UI element with a tooltip. This is
+the same "what is the cursor over" resolution the client runs every frame to build its own
+tooltip (UIManager.ResolveTooltipUnderMouse): the world object first
+(PlayerTargeting.TooltipObject / MouseTarget / HoveredDeco), then the NGUI element under the
+cursor. The text-flattening and kind logic lives in
+UnityProject/Assets/Scripts/Lua/LuaMouseLogic.cs so EditMode tests can pin it; the resolver and
+bindings are in LuaManager.cs (#region Under-mouse API).
+
+Function
+Returns
+Nothing under cursor
+
+ShroudGetDescriptionUnderMouse()
+string — the full tooltip text, markup stripped. Item tooltips come back as the name line, a newline, then the stat/description block.
+""
+
+ShroudGetNameUnderMouse()
+string — the title line only (item name, interact text, scene/NPC name). Falls back to the entity's display name for live NPCs and players, which carry no tooltip.
+""
+
+ShroudGetKindUnderMouse()
+string — "player", "npc", "item", "container", "deco", "object" (unclassified world object), or "ui".
+"none"
+
+ShroudGetIdUnderMouse()
+int — session-local id of the world entity/deco, stable while it lives (same convention as ShroudGetTargetId); -1 for a pure UI hover.
+-1
+
+Behavior rules:
+
+Ungated on purpose. Unlike the client's own tooltip, these functions ignore the display
+  gating (mouse button held, HUD hidden, hover delay not yet elapsed), so an addon can read what
+  the cursor is over at the exact moment of a click. The text is still only ever what the stock
+  tooltip would show — addons never see more than the game already reveals.
+
+Item kind travels with the item. An item tooltip reports kind "item" wherever it appears —
+  world drop, inventory, container slot, vendor row, mail — not a generic "ui".
+
+Per-frame cache. All four functions resolve once per frame (keyed on Time.frameCount);
+  building an item tooltip formats a whole stat block, so calling all four in one ShroudOnUpdate
+  costs one resolution, not four.
+
+Known gaps. A skill tooltip reports the skill's name and description text, not the full
+  computed stat panel the UI draws (that panel is built inside the tooltip prefab, not carried on
+  the content). A handful of specialized tooltip types (plot-storage slot, skill-advancement mode)
+  have no addon-readable text and return "" for the description while still reporting "ui".
+
+Pair these with the existing ShroudMouseX / ShroudMouseY globals when an addon needs both the
+screen position and the identity of what is under it.
+
+Tests¶
+
+UnityProject/Assets/Editor/PortedTests/LuaGcApiTests.cs (EditMode) pins the override's
+contract, including the stock-MoonSharp nil-"count" precondition.
+UnityProject/Assets/Editor/PortedTests/LuaInkApiTests.cs (EditMode) pins the Ink bridge:
+the exact PlayerPrefs key format shared with CustomNpcStoryUI, value formatting, and the
+fail-soft guards.
+
+UnityProject/Assets/Editor/PortedTests/LuaTargetApiTests.cs pins the target API's pure logic:
+debuff disposition mapping, the hidden-health clamp, the player-target vitals-only stat policy,
+the legacy hidden-stat list, and the Lua-visible shape of the extended RuneEffects.
+
+UnityProject/Assets/Editor/PortedTests/LuaMouseApiTests.cs pins the under-mouse API's pure
+logic: how each TooltipContent type flattens into the description and name, markup stripping,
+equipment-comparison using only the hovered item, and the kind precedence.
+
+Shroud of the Avatar · community Lua addon documentation. Generated from the client bindings. Docs home · Addon store

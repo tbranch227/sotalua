@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Host internals &middot; SotA Lua Addons</title>
+<meta name="robots" content="index,follow">
+<meta name="description" content="Documentation for writing Lua addons for Shroud of the Avatar.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html" style="text-decoration:none">
+    <span class="crest">SotA</span><span class="title">Lua <b>Addons</b></span>
+  </a>
+  <button class="menu-toggle" aria-label="Toggle navigation">&#9776;</button>
+  <nav class="topnav">
+    <a href="index.html">Home</a>
+    <a href="guide.html">Guide</a>
+    <a href="reference.html">API Reference</a>
+    <a href="internals.html" class="active">Host internals</a>
+    <a href="agent.html">Agent reference</a>
+    <a href="https://addons.catnipgames.net" target="_blank" rel="noopener">Addon store &#8599;</a>
+  </nav>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <input type="text" class="side-search" id="side-search" placeholder="Filter 9 entries..." autocomplete="off">
+  <div id="search-results"></div>
+  <div class="side-title">On this page</div>
+  <nav id="side-nav">
+<a href="#host-wiring">Host wiring</a>
+<a href="#garbage-collection-api-914">Garbage collection API (#914)</a>
+<a href="#frame-timing-globals">Frame timing globals</a>
+<a href="#ink-conversation-variable-bridge-745">Ink conversation variable bridge (#745)</a>
+<a href="#target-api-746">Target API (#746)</a>
+<a href="#under-mouse-api-1031">Under-mouse API (#1031)</a>
+<a href="#tests">Tests</a>
+  </nav>
+</aside>
+  <main class="content"><div class="prose">
+<h1 id="lua-addon-system-moonsharp">Lua addon system (MoonSharp)<a class="headerlink" href="#lua-addon-system-moonsharp" title="Link to this section">&para;</a></h1>
+<blockquote>
+<p>Player-facing docs: the <a href="guide.html">authoring guide</a> (how to write/install addons,
+callbacks, the sandbox, and the migration notes for existing addons) and the
+<a href="reference.html">API reference</a> (every <code>Shroud*</code> function). This page is the host-internals doc.</p>
+</blockquote>
+<p>The client hosts player-written Lua addons via MoonSharp (vendored C# source,
+<code>UnityProject/Assets/Plugins/MoonSharp/</code>). This page covers the host wiring, the
+garbage-collection / frame-timing API added for tracker #914, and the current-target
+API added for tracker #746.</p>
+<h2 id="host-wiring">Host wiring<a class="headerlink" href="#host-wiring" title="Link to this section">&para;</a></h2>
+<ul>
+<li>Host: <code>UnityProject/Assets/Scripts/Lua/LuaManager.cs</code> (MonoBehaviour).</li>
+<li>One shared <code>MoonSharp.Interpreter.Script</code> (<code>m_bootScript</code>, <code>CoreModules.Preset_Complete</code>) holds
+  every enabled addon; addons are <code>*.lua</code> files in the user data <code>Lua/</code> folder.</li>
+<li>Only <strong>enabled</strong> addons execute. A disabled addon's body is never run into <code>m_bootScript</code> at load
+  (<code>ForceReload</code> / <code>LoadPackagedScript</code> gate the <code>DoString</code> on the pref-derived enabled state, #1137),
+  so a disabled addon is fully inert and contributes no globals — nothing it defines is reachable
+  (including via <code>/lua &lt;function&gt;</code>) until it is enabled. Enabling runs the body: <code>EnableScript</code> for a
+  flat addon, <code>ForceReload</code> for a package. The addon still gets a <code>ScriptEntry</code> while disabled so it
+  lists in the manager.</li>
+<li>Callbacks (<code>ShroudOnUpdate</code>, <code>ShroudOnGUI</code>, <code>ShroudOnStart</code>, mouse/scene/sound hooks, …) are
+  detected by re-running each file in a throwaway Script and stored per addon (<code>ScriptEntry</code>);
+  <code>LuaManager.Update()</code> drives <code>ShroudOnUpdate</code> for each enabled addon every frame.</li>
+<li>The <code>Shroud*</code> API surface is registered in <code>InitAPICalls()</code> and friends; per-frame globals
+  (player position, health, time values) are pushed in <code>SetGlobalVariables()</code>.</li>
+<li>Callbacks run under an execution watchdog (commit <code>02261f6626</code>): a callback that runs past
+  its wall-clock budget (1 s for a normal callback, 5 s for load-time / <code>ShroudOnStart</code>) is
+  aborted with a <code>MoonSharpWatchdogException</code> — which derives from <code>System.Exception</code>, not
+  <code>InterpreterException</code>, so a <code>pcall</code>-wrapped infinite loop cannot swallow it. An addon that
+  errors repeatedly (≥8 times in 10 s) is auto-disabled in memory until <code>/lua reload</code>. See the
+  authoring guide's sandbox section for the player-facing summary.</li>
+</ul>
+<h2 id="garbage-collection-api-914">Garbage collection API (#914)<a class="headerlink" href="#garbage-collection-api-914" title="Link to this section">&para;</a></h2>
+<p>MoonSharp has no Lua-side GC — Lua values are .NET objects collected by Unity's (Boehm) GC.
+Stock MoonSharp mapped <code>collectgarbage("collect")</code> to a full blocking collect (measured
+140-190ms on a live-sized heap) and returned nil for every other mode, so addons could neither
+measure memory nor collect incrementally.</p>
+<p><code>LuaGcApi</code> (<code>UnityProject/Assets/Scripts/Lua/LuaGcApi.cs</code>) overrides <code>collectgarbage</code> in every
+Script the host creates:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Behavior</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>collectgarbage()</code> / <code>("collect")</code> / <code>("restart")</code></td>
+<td>Full blocking collect (unchanged — still expensive, use <code>"step"</code> instead)</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td><code>collectgarbage("count")</code></td>
+<td>Managed heap size</td>
+<td><code>KB, bytes % 1024</code> (two values, Lua 5.2 style)</td>
+</tr>
+<tr>
+<td><code>collectgarbage("step"[, ms])</code></td>
+<td>Time-budgeted incremental collect via <code>GarbageCollector.CollectIncremental</code>. Optional arg = millisecond budget (default 3, clamped 0.1-50). Lua's KB step arg has no CLR mapping. No-op returning <code>true</code> if incremental GC is unavailable — never falls back to a blocking collect.</td>
+<td><code>true</code> when the collection cycle is complete</td>
+</tr>
+<tr>
+<td><code>collectgarbage("isrunning")</code></td>
+<td>GC enabled check</td>
+<td>boolean</td>
+</tr>
+<tr>
+<td>any other mode (<code>"stop"</code>, <code>"setpause"</code>, <code>"setstepmul"</code>, …)</td>
+<td>No-op — addons cannot disable the client-wide GC</td>
+<td><code>nil</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>The project ships with Unity incremental GC enabled (<code>gcIncremental: 1</code>), so automatic
+collections are already time-sliced; <code>"step"</code> lets an addon voluntarily donate extra budget
+(e.g. during loading screens) instead of forcing a stall with <code>"collect"</code>.</p>
+<h2 id="frame-timing-globals">Frame timing globals<a class="headerlink" href="#frame-timing-globals" title="Link to this section">&para;</a></h2>
+<ul>
+<li><code>ShroudDeltaTime</code> — <code>Time.deltaTime</code>, clamped by the project's Maximum Allowed Timestep
+  (0.1s, <code>ProjectSettings/TimeManager.asset</code>). During any stall longer than 100ms it saturates
+  at ~0.1 — correct for pacing animation, wrong for measuring stalls. Kept clamped for
+  back-compat.</li>
+<li><code>ShroudRealDeltaTime</code> (new, #914) — unclamped wall-clock frame delta
+  (<code>Time.realtimeSinceStartupAsDouble</code> difference), shows the true length of long frames.
+  Use this for addon-side hitch diagnostics.</li>
+</ul>
+<p>Both are pushed once per frame after addon callbacks run, so a stall in frame N is visible to
+addons one frame later.</p>
+<h2 id="ink-conversation-variable-bridge-745">Ink conversation variable bridge (#745)<a class="headerlink" href="#ink-conversation-variable-bridge-745" title="Link to this section">&para;</a></h2>
+<p>Player-authored custom-NPC Ink scripts persist per-character state through their
+<code>saveVariable(varName)</code>/<code>loadVariable(varName)</code> external functions
+(<code>UnityProject/Assets/Scripts/UIControllers/CustomNpc/CustomNpcStoryUI.cs</code>), which read/write
+local PlayerPrefs under the key <code>&lt;PhotonCharacterName&gt;.Ink_&lt;varName&gt;</code> (the character's full
+name, <code>"First"</code> or <code>"First Last"</code>). <code>LuaInkApi</code>
+(<code>UnityProject/Assets/Scripts/Lua/LuaInkApi.cs</code>) exposes the same key space to addons,
+registered from <code>InitAPICalls()</code> with a character-name provider:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Returns</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ShroudLoadInkVariable(varName)</code></td>
+<td>string or nil</td>
+<td>The stored string, or nil when unsaved / no character / bad varName. A saved <code>""</code> returns <code>""</code>, not nil.</td>
+</tr>
+<tr>
+<td><code>ShroudSaveInkVariable(varName, value)</code></td>
+<td>boolean</td>
+<td>Stores string / number / boolean; <code>false</code> (no write) for any other type, a string over 8192 chars, NaN/Inf, bad varName, or no character.</td>
+</tr>
+<tr>
+<td><code>ShroudHasInkVariable(varName)</code></td>
+<td>boolean</td>
+<td>Whether a value is stored.</td>
+</tr>
+<tr>
+<td><code>ShroudDeleteInkVariable(varName)</code></td>
+<td>boolean</td>
+<td>Removes the value; <code>true</code> only if one existed. Safe: Ink's <code>loadVariable</code> re-seeds the script default when the key is missing.</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>varName</code> must be a non-empty Lua string (no coercion — a numeric <code>5</code> never aliases the key
+<code>...Ink_5</code>). Value formatting matches what Ink's <code>loadVariable</code> <code>int.TryParse</code> round-trips:
+integral numbers store without a decimal point (<code>42</code> / <code>42.0</code> → <code>"42"</code>), non-integral store
+invariant (<code>3.5</code> → <code>"3.5"</code>, which Ink reads back as a string), booleans store <code>"1"</code>/<code>"0"</code> (the
+embedded Ink runtime has no bool type; int truthiness is its idiom).</p>
+<p>Synchronization contract: the bridge only touches PlayerPrefs, never a running story's
+in-memory <code>variablesState</code>. A conversation observes a Lua write at its next
+<code>loadVariable(var)</code> call, and an addon observes a story write after the story's
+<code>saveVariable(var)</code> — save/load are the explicit sync points, there are no notifications
+(poll in <code>ShroudOnUpdate</code> if reacting matters).</p>
+<p>Gotchas:</p>
+<ul>
+<li>Ink's <code>loadVariable</code> treats the stored literal string <code>"null"</code> as "never saved" and resets
+  the variable to the script default; the Lua side (HasKey-based) reads it back faithfully.
+  Avoid storing <code>"null"</code> for values an Ink script must read.</li>
+<li>Ink's <code>loadVariable</code> seeds the script's default into PlayerPrefs on first call, so
+  <code>ShroudHasInkVariable</code> can be <code>true</code> for a variable a conversation merely loaded.</li>
+<li>Keys are per character <strong>name</strong> and device-local (PlayerPrefs): renames orphan data,
+  same-named characters on one machine share, other machines see nothing.</li>
+<li>Writes are not flushed per call (parity with the Ink side; Unity flushes on clean quit).</li>
+</ul>
+<h2 id="target-api-746">Target API (#746)<a class="headerlink" href="#target-api-746" title="Link to this section">&para;</a></h2>
+<p>Functions exposing the player's current target, for buff monitors and similar addons. The
+target resolves exactly like the stock target frame: the locked (selected) target if there is
+one, otherwise the closest/best target, and only combatants count. Implementations live in
+<code>LuaManager.cs</code> (<code>#region Target API</code>); the pure decision logic (debuff mapping, hidden-health
+clamp, stat policy) is in <code>UnityProject/Assets/Scripts/Lua/LuaTargetLogic.cs</code> so EditMode tests
+can pin it.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Returns</th>
+<th>No target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ShroudHasTarget()</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetName()</code></td>
+<td>string</td>
+<td><code>"None"</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetId()</code></td>
+<td>int — session-local id, stable while the object lives; use it to detect target switches. Not persistent across sessions.</td>
+<td><code>-1</code></td>
+</tr>
+<tr>
+<td><code>ShroudIsTargetDead()</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+</tr>
+<tr>
+<td><code>ShroudIsTargetHealthHidden()</code></td>
+<td>bool — true while the target hides its health (see below)</td>
+<td><code>false</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetCurrentHealth()</code></td>
+<td>int</td>
+<td><code>-1</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetMaxHealth()</code></td>
+<td>int</td>
+<td><code>-1</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetCurrentFocus()</code> / <code>ShroudGetTargetMaxFocus()</code></td>
+<td>int</td>
+<td><code>-1</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetBuff()</code></td>
+<td><code>List&lt;RuneEffects&gt;</code> (same shape as <code>ShroudGetPlayerBuff</code>)</td>
+<td>nil</td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetBuffCount()</code></td>
+<td>int</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetBuffName(i)</code> / <code>ShroudGetTargetBuffDescription(i)</code></td>
+<td>string (0-based index)</td>
+<td><code>"Invalid"</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetBuffTimeRemaining(i)</code></td>
+<td>float seconds</td>
+<td><code>-1</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetTargetStatValueByNumber(n)</code> / <code>ShroudGetTargetStatValueByName(s)</code></td>
+<td>float</td>
+<td><code>InvalidStatResult</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Behavior rules (all mirror what the stock UI already reveals — addons can never show more):</p>
+<ul>
+<li><strong>Hidden health</strong>: some creatures hide their health until they drop below half. While hidden,
+  <code>ShroudGetTargetCurrentHealth()</code> reports the max value (exactly like the target frame's full
+  bar) and <code>ShroudIsTargetHealthHidden()</code> returns true so an addon can render a "?" instead.</li>
+<li><strong>Player targets are vitals-only</strong>: when the target is another player, the stat functions
+  return <code>InvalidStatResult</code> for everything except <code>CurrentHealth</code>, <code>Health</code>, <code>CurrentFocus</code>,
+  and <code>Focus</code>. NPC/creature targets expose the full stat set minus the same hidden list the
+  player stat functions use (virtues, GM/AI flags).</li>
+<li><strong><code>RuneEffects</code> gained fields</strong> (also on <code>ShroudGetPlayerBuff</code>/<code>ShroudGetPetBuff</code> results):
+  <code>RuneId</code> (int skill id), <code>IsDebuff</code> (bool, hostile-disposition runes), <code>StackCount</code> (number of
+  grouped effect entries under the rune — a rune applying several effect components counts each
+  one, so treat it as an upper bound on true stacks).</li>
+</ul>
+<h3 id="feature-detection-shroudluaapiversion">Feature detection: <code>ShroudLuaApiVersion</code><a class="headerlink" href="#feature-detection-shroudluaapiversion" title="Link to this section">&para;</a></h3>
+<p>Builds with the target API define the global <code>ShroudLuaApiVersion</code> (a plain number; bumped when
+the API surface grows — <code>1</code> = target API #746, <code>2</code> = under-mouse API #1031). It is set at Script
+creation, before addon files run, so reading it at addon top level is safe everywhere:</p>
+<pre><code class="language-lua">if ShroudLuaApiVersion and ShroudLuaApiVersion &gt;= 1 then hasTargetApi = true end
+if ShroudLuaApiVersion and ShroudLuaApiVersion &gt;= 2 then hasUnderMouseApi = true end
+</code></pre>
+<p>Calling <code>Shroud*</code> functions at top level is still unsupported (they register after addon files
+load); call them only inside callbacks like <code>ShroudOnUpdate</code>.</p>
+<h3 id="perf-notes">Perf notes<a class="headerlink" href="#perf-notes" title="Link to this section">&para;</a></h3>
+<p>Every call resolves the target and every buff call snapshots the effect array (an allocation).
+Prefer one <code>ShroudGetTargetBuff()</code> per <code>ShroudOnUpdate</code> over per-index <code>Count</code>/<code>Name</code>/<code>Time</code>
+loops, and see <code>collectgarbage("step")</code> above for donating GC budget.</p>
+<h2 id="under-mouse-api-1031">Under-mouse API (#1031)<a class="headerlink" href="#under-mouse-api-1031" title="Link to this section">&para;</a></h2>
+<p>Functions exposing whatever is under the mouse cursor — a world NPC or player, a world item or
+container, a placed decoration, an inventory/vendor item, or a UI element with a tooltip. This is
+the same "what is the cursor over" resolution the client runs every frame to build its own
+tooltip (<code>UIManager.ResolveTooltipUnderMouse</code>): the world object first
+(<code>PlayerTargeting.TooltipObject</code> / <code>MouseTarget</code> / <code>HoveredDeco</code>), then the NGUI element under the
+cursor. The text-flattening and kind logic lives in
+<code>UnityProject/Assets/Scripts/Lua/LuaMouseLogic.cs</code> so EditMode tests can pin it; the resolver and
+bindings are in <code>LuaManager.cs</code> (<code>#region Under-mouse API</code>).</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Returns</th>
+<th>Nothing under cursor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ShroudGetDescriptionUnderMouse()</code></td>
+<td>string — the full tooltip text, markup stripped. Item tooltips come back as the name line, a newline, then the stat/description block.</td>
+<td><code>""</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetNameUnderMouse()</code></td>
+<td>string — the title line only (item name, interact text, scene/NPC name). Falls back to the entity's display name for live NPCs and players, which carry no tooltip.</td>
+<td><code>""</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetKindUnderMouse()</code></td>
+<td>string — <code>"player"</code>, <code>"npc"</code>, <code>"item"</code>, <code>"container"</code>, <code>"deco"</code>, <code>"object"</code> (unclassified world object), or <code>"ui"</code>.</td>
+<td><code>"none"</code></td>
+</tr>
+<tr>
+<td><code>ShroudGetIdUnderMouse()</code></td>
+<td>int — session-local id of the world entity/deco, stable while it lives (same convention as <code>ShroudGetTargetId</code>); <code>-1</code> for a pure UI hover.</td>
+<td><code>-1</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Behavior rules:</p>
+<ul>
+<li><strong>Ungated on purpose.</strong> Unlike the client's own tooltip, these functions ignore the display
+  gating (mouse button held, HUD hidden, hover delay not yet elapsed), so an addon can read what
+  the cursor is over at the exact moment of a click. The <em>text</em> is still only ever what the stock
+  tooltip would show — addons never see more than the game already reveals.</li>
+<li><strong>Item kind travels with the item.</strong> An item tooltip reports kind <code>"item"</code> wherever it appears —
+  world drop, inventory, container slot, vendor row, mail — not a generic <code>"ui"</code>.</li>
+<li><strong>Per-frame cache.</strong> All four functions resolve once per frame (keyed on <code>Time.frameCount</code>);
+  building an item tooltip formats a whole stat block, so calling all four in one <code>ShroudOnUpdate</code>
+  costs one resolution, not four.</li>
+<li><strong>Known gaps.</strong> A skill tooltip reports the skill's name and description text, not the full
+  computed stat panel the UI draws (that panel is built inside the tooltip prefab, not carried on
+  the content). A handful of specialized tooltip types (plot-storage slot, skill-advancement mode)
+  have no addon-readable text and return <code>""</code> for the description while still reporting <code>"ui"</code>.</li>
+</ul>
+<p>Pair these with the existing <code>ShroudMouseX</code> / <code>ShroudMouseY</code> globals when an addon needs both the
+screen position and the identity of what is under it.</p>
+<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Link to this section">&para;</a></h2>
+<p><code>UnityProject/Assets/Editor/PortedTests/LuaGcApiTests.cs</code> (EditMode) pins the override's
+contract, including the stock-MoonSharp nil-<code>"count"</code> precondition.
+<code>UnityProject/Assets/Editor/PortedTests/LuaInkApiTests.cs</code> (EditMode) pins the Ink bridge:
+the exact PlayerPrefs key format shared with <code>CustomNpcStoryUI</code>, value formatting, and the
+fail-soft guards.</p>
+<p><code>UnityProject/Assets/Editor/PortedTests/LuaTargetApiTests.cs</code> pins the target API's pure logic:
+debuff disposition mapping, the hidden-health clamp, the player-target vitals-only stat policy,
+the legacy hidden-stat list, and the Lua-visible shape of the extended <code>RuneEffects</code>.</p>
+<p><code>UnityProject/Assets/Editor/PortedTests/LuaMouseApiTests.cs</code> pins the under-mouse API's pure
+logic: how each <code>TooltipContent</code> type flattens into the description and name, markup stripping,
+equipment-comparison using only the hovered item, and the <code>kind</code> precedence.</p>
+  </div></main>
+</div>
+<footer class="site-footer">Shroud of the Avatar &middot; community Lua addon documentation. Generated from the client bindings. <a href="index.html">Docs home</a> &middot; <a href="https://addons.catnipgames.net" target="_blank" rel="noopener">Addon store</a></footer>
+<script>window.__SEARCH_INDEX=[{"t": "Feature detection: ShroudLuaApiVersion", "id": "feature-detection-shroudluaapiversion"}, {"t": "Perf notes", "id": "perf-notes"}, {"t": "Host wiring", "id": "host-wiring"}, {"t": "Garbage collection API (#914)", "id": "garbage-collection-api-914"}, {"t": "Frame timing globals", "id": "frame-timing-globals"}, {"t": "Ink conversation variable bridge (#745)", "id": "ink-conversation-variable-bridge-745"}, {"t": "Target API (#746)", "id": "target-api-746"}, {"t": "Under-mouse API (#1031)", "id": "under-mouse-api-1031"}, {"t": "Tests", "id": "tests"}];</script>
+<script src="docs.js"></script>
+</body>
+</html>

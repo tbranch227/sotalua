@@ -1,0 +1,9 @@
+{
+  "slug": "session-log",
+  "name": "Session Log",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Keeps a per-character history of play sessions: when you logged in and out, which scenes you visited, and the experience and gold earned in each.",
+  "minApiVersion": 1,
+  "permissions": []
+}

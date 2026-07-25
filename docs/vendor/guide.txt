@@ -1,0 +1,349 @@
+Guide · SotA Lua Addons
+
+    SotALua Addons
+
+  ☰
+
+    Home
+    Guide
+    API Reference
+    Host internals
+    Agent reference
+    Addon store ↗
+
+  On this page
+
+Installing and enabling an addon
+Addon metadata
+The addon lifecycle and callbacks
+Reading game state
+Drawing UI
+Saving settings
+Feature detection
+The sandbox
+Migrating an existing addon (Phase 0/1 changes)
+Sharing addons: the Community Addons window
+Submitting your own addon
+
+Lua addon authoring guide¶
+
+This is the player-facing guide to writing Lua addons for the game. It covers how addons load, the
+callbacks you can implement, what the API lets you read and draw, how to save settings, feature
+detection, the sandbox rules, and — at the end — the adjustments existing addons need after the
+Phase 0/1 hardening.
+
+For the exhaustive function-by-function list, see the Lua addon API reference.
+For the internals, see host internals.
+
+Installing and enabling an addon¶
+
+Addons are plain *.lua files in your game data Lua/ folder. Open it in-game with the addon
+manager's Open Folder button, or the /lua path chat command.
+
+Newly added addons load disabled. After dropping a file in, open the addon manager and toggle it
+on (you will also see a "New Lua addon(s) detected and left disabled" line in chat). This is a safety
+change: a file you just downloaded does not run until you say so.
+
+Reload all addons with /lua reload (or the manager's Reload All button). Unload them with
+/lua unload.
+
+Addon metadata¶
+
+The manager reads five optional fields from the top of your file. Declare them as locals with this
+exact form:
+
+local ScriptName = "My HUD"
+local Version = "1.0"
+local CreatorName = "YourName"
+local Description = "A heads-up display."
+local IconPath = "icon.png"   -- relative to the Lua folder
+
+The addon lifecycle and callbacks¶
+
+Your addon is a script that defines global functions the game calls. Define only the ones you need.
+
+Callback
+When it fires
+Arguments
+
+ShroudOnStart()
+Once, when the addon loads or is enabled
+—
+
+ShroudOnUpdate()
+Every frame
+—
+
+ShroudOnGUI()
+Every IMGUI event (legacy drawing)
+—
+
+ShroudOnConsoleInput(type, sourcePlayer, message)
+Each incoming chat line
+strings
+
+ShroudOnExperienceGain(type, amount)
+On XP gain ("Adventurer"/"Producer")
+string, number
+
+ShroudOnMouseOver(id, kind) / ShroudOnMouseOut(id, kind)
+Hover enter/exit of one of your widgets
+int, UI
+
+ShroudOnMouseClick(id, kind)
+Click on one of your widgets
+int, UI
+
+ShroudOnInputChange(id, text)
+Your input field changed
+int, string
+
+ShroudOnToggleChange(id, isOn)
+Your toggle changed
+int, bool
+
+ShroudOnSceneLoaded(sceneName) / ShroudOnSceneUnloaded()
+Scene transitions
+string / —
+
+ShroudOnLogOut()
+At logout
+—
+
+ShroudOnPlaySound(clipName)
+A UI sound played
+string
+
+ShroudOnPlayFX(fxName, on)
+An FX started/stopped
+string, bool
+
+ShroudOnPlayEmote(emote)
+You performed an emote via ShroudPlayEmote
+string
+
+ShroudOnDisableScript()
+Your addon was turned off
+—
+
+ShroudOnExperienceChanged is accepted as an alias of ShroudOnExperienceGain.
+
+Declare everything local¶
+
+All enabled addons share one global environment. A top-level function foo() or a bare x = 1
+becomes a global that every other addon sees — and if two addons define a global with the same name,
+the last one loaded wins and quietly replaces the other's. Declare every helper and variable
+local. Only your ShroudOn* callbacks (and metadata fields the manager scrapes) need to be
+global-ish, and those are captured per addon at load time.
+
+local state = {}                 -- good: private to this addon
+local function refresh() ... end -- good
+
+function ShroudOnUpdate()        -- callback: fine as a global
+    refresh()
+end
+
+Reading game state¶
+
+The API is read-mostly by design: you can read what your own UI already shows (your stats, your
+inventory, your party, your current target, whatever is under your cursor) and draw your own overlay,
+but there is no function to move, cast, target, loot, trade, or send chat. See the
+API reference for every read function.
+
+Per-frame values (player position, health, focus, gold, time, mouse) arrive as globals such as
+ShroudPlayerCurrentHealth and ShroudMouseX, refreshed each frame. Everything else is a function
+call — call these only inside a callback (they are not registered yet at file top level).
+
+Drawing UI¶
+
+Two systems exist. Prefer the retained widget set (ShroudUIText, ShroudUIImage, ShroudUIButton,
+ShroudUIPanel, ShroudUIInput, ShroudUIToggle plus the ShroudSet* helpers): create objects once
+in ShroudOnStart, update them as needed. The legacy immediate-mode calls (ShroudGUILabel,
+ShroudButton, ShroudDrawTexture) run only inside ShroudOnGUI and will eventually be retired.
+
+Hover tooltips on drawn icons (API v3)¶
+
+An immediate-mode icon can tell the player what it is. ShroudDrawTextureTooltip(x, y, w, h, texId, text)
+draws a texture and shows text when the cursor is over it; ShroudGUITooltip(x, y, w, h, text) attaches
+a tooltip to a region you drew yourself. Combined with the real buff icon and native-matching tooltip text
+(ShroudGetBuffIcon(i) / ShroudGetBuffTooltip(i)), a buff-icon addon can show recognizable icons that
+name their skill on hover:
+
+function ShroudOnGUI()
+    for i = 0, ShroudGetBuffCount() - 1 do
+        local tex = ShroudGetBuffIcon(i)
+        if tex >= 0 then
+            ShroudDrawTextureTooltip(40 + i * 44, 220, 40, 40, tex, ShroudGetBuffTooltip(i))
+        end
+    end
+end
+
+The Buff Icons reference addon is the full worked example.
+
+Saving settings¶
+
+Use the saved-variables API (see the reference): ShroudSetSavedVar(key, value) /
+ShroudGetSavedVar(key) persist per-character (or per-account) JSON to
+Lua/SavedVariables/<addon>.<scope>.json, written at logout and on demand. This replaces writing your
+own files with io.* — which is now confined to the Lua folder (see below).
+
+Feature detection¶
+
+New API is added behind a version number. Read ShroudLuaApiVersion (a plain global, safe at file top
+level) and gate accordingly:
+
+local hasNewApi = ShroudLuaApiVersion and ShroudLuaApiVersion >= 3
+
+The sandbox¶
+
+Addons run inside a sandbox:
+
+File access is confined to the Lua/ folder. io.open, os.remove, os.rename, and
+  os.tmpname all work, but only for paths inside Lua/ (build them from the ShroudLuaPath
+  global). A path outside the folder raises a Lua error.
+
+os.execute, os.exit, and os.getenv are disabled. os.execute and os.exit raise a Lua
+  error; os.getenv returns nil.
+
+A runaway addon is stopped. If a single callback runs too long (an accidental infinite loop), it
+  is aborted with an error rather than freezing the client. An addon that errors repeatedly in a short
+  window is automatically disabled — fix it and /lua reload to retry.
+
+Errors are reported in chat, prefixed with your addon's name.
+
+Migrating an existing addon (Phase 0/1 changes)¶
+
+Most addons need no changes. The list below is everything that changed; search your scripts for the
+named functions.
+
+If your addon…
+What changed
+What to do
+
+calls os.execute, os.exit, or os.getenv
+These now raise an error / return nil.
+Remove them. There is no supported replacement — they were never intended to be available.
+
+reads or writes files outside the Lua/ folder with io.* / os.remove / os.rename
+Now raises a Lua error.
+Move the file inside the Lua/ folder; build paths from ShroudLuaPath. In-folder access is unchanged.
+
+saves its settings by writing a file
+Still works if the file is inside Lua/.
+Prefer the new ShroudSetSavedVar/ShroudGetSavedVar API.
+
+does heavy work in one callback
+A callback that runs too long is aborted.
+Spread work across frames, or use ShroudRegisterPeriodic. The budget is generous; only true hangs trip it.
+
+relies on being auto-enabled when dropped in
+New addons now load disabled.
+Enable it once in the addon manager after installing.
+
+defines ShroudOnPlayEmote
+This callback now actually fires (it never used to).
+Confirm the handler does what you intend.
+
+throws errors every frame
+The addon is now auto-disabled after repeated errors.
+Fix the error; /lua reload to retry.
+
+used /lua <function> from chat and found it did nothing
+/lua <func> [args] now correctly calls the named global; /lua code <lua> runs a snippet. Only globals from enabled addons are reachable — a disabled addon contributes nothing to call.
+Enable the addon in the manager first if you drive it through /lua <func>.
+
+defined a top-level global helper that collided with another addon
+Unchanged behavior, but worth fixing.
+Make your helpers local (see above).
+
+Everything else — the entire Shroud* read/UI/sound/periodic surface — keeps identical names,
+signatures, and return values, including long-standing quirks (0-based widget ids vs 1-based sound
+ids, the ShroudSetDragguable spelling, ShroudGetGameTime day/month being engine value +1,
+ShroudSetParent returning -1). Those are frozen for compatibility and documented in the
+API reference.
+
+Sharing addons: the Community Addons window¶
+
+You can share an addon with other players through the in-game Community Addons window (open
+it with the /addons chat command, or the Get Addons button in the addon manager). The window
+lists addons other players have submitted and an admin has approved. Each entry shows the author, a
+short description, how many players have it installed, and when it was last updated.
+
+Install / Update / Remove download an approved addon into its own folder and, for updates,
+  replace it in place. An installed addon starts disabled, the same as a file you drop in
+  yourself — enable it in the manager (or with the window's Run toggle) once you have looked at
+  what it does.
+
+Removing an addon deletes its folder but keeps its saved variables, so reinstalling later
+  keeps your settings.
+
+Every version is read by an automated reviewer and then approved by a human before it appears in
+  the list. The reviewer writes the one-paragraph description you see on each entry.
+
+Packages vs. flat files¶
+
+A shared addon is a package: a small zip containing a manifest.json, one or more *.lua
+files, and an optional icon.png and README.md. It installs into its own subfolder,
+Lua/<slug>/, instead of sitting loose in Lua/. The <slug> is a short lowercase id (letters,
+digits, hyphens) that uniquely names the addon in the store.
+
+Your hand-installed flat *.lua files keep working exactly as before — the loader reads both
+loose files in Lua/ and one level of Lua/<slug>/ package folders. Inside a package, all the
+.lua files listed in the manifest run in the order listed and share one global environment (the
+same as putting several function definitions in one file); require() between package files is
+not supported.
+
+The manifest.json for a package looks like this (the store builds it for you when you submit, so
+you rarely write it by hand):
+
+{
+  "manifest_version": 1,
+  "slug": "loot-tracker",
+  "name": "Loot Tracker",
+  "version": "1.2.0",
+  "description": "Shows a running total of loot picked up this session.",
+  "author": "YourName",
+  "files": ["main.lua"],
+  "icon": "icon.png",
+  "min_api_version": 2,
+  "permissions": []
+}
+
+version is three numbers (N.N.N) and must go up every time you submit an update.
+permissions is reserved for future capability grants and must be empty today. min_api_version
+is the lowest ShroudLuaApiVersion your addon needs; a player on an older build can install it but
+cannot enable it until they update.
+
+Submitting your own addon¶
+
+From the Community Addons window, pick your addon under Your local addons (for a single-file
+addon) or select an installed package, and choose Submit to Community. The game bundles your
+.lua file (plus its icon, if you set IconPath) into a package, generates the manifest, and
+uploads it — you do not build the zip yourself.
+
+You sign in with your game account (the same login you use to play); the password is used
+  only to authorize the upload and is never stored.
+
+On the first submission you pick the slug and starting version. For an update, the slug is
+  fixed and you supply a higher version and a short changelog.
+
+After you submit, the addon is scanned and waits for an admin to approve it. Track its state in
+  the window's My Submissions tab: Scanning, Waiting for review, Approved, or Rejected
+  (with the reviewer's note).
+
+The reviewer reads your code to write the player-facing description and to check for anything
+misleading or unsafe. The client sandbox (below) is still the real safety boundary — review is an
+extra check and a way to keep the catalog readable, not a replacement for it.
+
+From a flat addon to a package¶
+
+If you previously shared a flat MyAddon.lua by hand and now submit it as package myaddon, the
+packaged copy is a new addon identity: it starts disabled and with empty saved variables (the
+game keys enable-state and saved variables on the package, not the old filename). Players re-enable
+it once. If you want to carry a player's old settings across, ship one-time import code that reads
+the old Lua/SavedVariables/MyAddon.*.json through the confined io API and copies the values in
+with ShroudSetSavedVar. The store never deletes or renames a player's loose files; if a package
+would collide with a loose file of the same name, the game asks the player before moving the loose
+file aside.
+
+Shroud of the Avatar · community Lua addon documentation. Generated from the client bindings. Docs home · Addon store

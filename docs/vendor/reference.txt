@@ -1,0 +1,4294 @@
+API Reference · SotA Lua Addons
+
+    SotALua Addons
+
+  ☰
+
+    Home
+    Guide
+    API Reference
+    Host internals
+    Agent reference
+    Addon store ↗
+
+  On this page
+
+How to read this reference
+Categories
+Callbacks
+Per-frame globals and constants
+Character and stats
+Pet
+Target
+Under the mouse
+Party
+Inventory, equipment, decks, emotes
+Scene and world
+Screen, input, and UI state
+UI widgets: creating and positioning
+UI widgets: parenting, visibility, and behavior
+UI widgets: buttons, inputs, and toggles
+Legacy immediate-mode drawing
+Textures and sound
+Console, garbage collection, and timers
+Ink conversation bridge
+Saved variables
+Data shapes
+Frozen quirks
+
+Lua addon API reference¶
+
+Complete reference for the Shroud* API exposed to player addons, generated from the host bindings in LuaManager.cs (plus LuaInkApi.cs for the Ink bridge). See the authoring guide for how to write and install addons, and host internals for how the runtime is wired. For a token-dense version aimed at AI coding agents, see the agent reference.
+
+How to read this reference¶
+
+Each category opens with a quick-reference table; every function name links down to a full entry with its signature, parameters, return value, and a short Lua example. Types are given in Lua terms (number, string, boolean, table, list, nil) rather than the underlying C# types.
+
+Conventions. Unless noted, a function is valid only inside a callback (the API is registered after addon files load). Indices are 0-based, except the sound API (noted there). Failure sentinels: numbers return -999 (the global InvalidStatResult), names return "INVALID" or "None", objects return nil. The current API version (ShroudLuaApiVersion) is 3.
+
+Categories¶
+
+Callbacks
+
+Per-frame globals and constants
+
+Character and stats
+
+Pet
+
+Target
+
+Under the mouse
+
+Party
+
+Inventory, equipment, decks, emotes
+
+Scene and world
+
+Screen, input, and UI state
+
+UI widgets: creating and positioning
+
+UI widgets: parenting, visibility, and behavior
+
+UI widgets: buttons, inputs, and toggles
+
+Legacy immediate-mode drawing
+
+Textures and sound
+
+Console, garbage collection, and timers
+
+Ink conversation bridge
+
+Saved variables
+
+Data shapes
+
+Frozen quirks
+
+Callbacks¶
+
+Callbacks are functions your addon defines; the host looks them up by name and calls them. Register one by declaring a global function with the exact name in your addon file — the loader captures it once, right after your file finishes running (ShroudOnStart also fires at that moment). Every callback is optional; define only the ones you need. A callback that throws is caught per-call and does not stop the other addons.
+
+Callback
+Signature
+When it fires
+
+ShroudOnStart
+ShroudOnStart()
+Once, when the addon loads and is enabled
+
+ShroudOnUpdate
+ShroudOnUpdate()
+Every frame while the addon is enabled
+
+ShroudOnGUI
+ShroudOnGUI()
+During Unity's IMGUI pass (legacy immediate-mode drawing only)
+
+ShroudOnConsoleInput
+ShroudOnConsoleInput(inputType, sourcePlayer, message)
+For each chat/console line received
+
+ShroudOnExperienceGain
+ShroudOnExperienceGain(experienceType, amount)
+When the player gains character experience
+
+ShroudOnExperienceChanged
+ShroudOnExperienceChanged(experienceType, amount)
+Alias of ShroudOnExperienceGain
+
+ShroudOnMouseOver
+ShroudOnMouseOver(id, kind)
+Mouse enters a Lua widget with an in/out listener
+
+ShroudOnMouseOut
+ShroudOnMouseOut(id, kind)
+Mouse leaves a Lua widget with an in/out listener
+
+ShroudOnMouseClick
+ShroudOnMouseClick(id, kind)
+A Lua widget with a click listener is clicked
+
+ShroudOnInputChange
+ShroudOnInputChange(id, text)
+A Lua input field's text changes
+
+ShroudOnToggleChange
+ShroudOnToggleChange(id, isOn)
+A Lua toggle's state changes
+
+ShroudOnSceneLoaded
+ShroudOnSceneLoaded(sceneName)
+A non-login scene finishes loading
+
+ShroudOnSceneUnloaded
+ShroudOnSceneUnloaded()
+A scene unloads
+
+ShroudOnLogOut
+ShroudOnLogOut()
+The login scene loads (logout / return to login)
+
+ShroudOnPlaySound
+ShroudOnPlaySound(clipName)
+A UI audio clip plays
+
+ShroudOnPlayFX
+ShroudOnPlayFX(fxName, on)
+A visual FX starts or ends near the player
+
+ShroudOnPlayEmote
+ShroudOnPlayEmote(emote)
+The local player performs an emote via ShroudPlayEmote
+
+ShroudOnDisableScript
+ShroudOnDisableScript()
+The addon is disabled
+
+ShroudOnStart¶
+
+ShroudOnStart()
+
+No arguments.
+
+Fires once, when the addon file has finished loading and the addon is enabled (also re-fires if the addon is reloaded). Use it for one-time setup: build your UI, read saved variables, register periodics. Per-frame globals such as ShroudPlayerX are already valid here.
+
+function ShroudOnStart()
+  greeting = "Hello, " .. ShroudGetPlayerName()
+  panelId = ShroudUIPanel(10, 10, 200, 60)
+  labelId = ShroudUIText(greeting, 18, 20, 20, 180, 40)
+  ShroudSetTextParent(labelId, panelId)
+end
+
+ShroudOnUpdate¶
+
+ShroudOnUpdate()
+
+No arguments.
+
+Fires every frame while the addon is enabled, before the GUI pass. Keep the body cheap; heavy work here costs frame rate. Read per-frame globals (ShroudPlayerCurrentHealth, ShroudTime, ShroudDeltaTime, ShroudMouseX/Y) from inside it.
+
+local accum = 0
+function ShroudOnUpdate()
+  accum = accum + ShroudDeltaTime
+  if accum >= 1.0 then
+    accum = 0
+    ShroudModifyText(labelId, "HP: " .. ShroudPlayerCurrentHealth)
+  end
+end
+
+ShroudOnGUI¶
+
+ShroudOnGUI()
+
+No arguments.
+
+Fires during Unity's IMGUI OnGUI pass (may run more than once per frame). This is the only place the legacy immediate-mode drawing calls (ShroudGUILabel, ShroudButton, ShroudButtonRepeat, ShroudDrawTexture) are valid. Retained widgets do not need it. The immediate-mode API is being phased out; prefer retained widgets for new addons.
+
+function ShroudOnGUI()
+  ShroudGUILabel(10, 80, 210, 100, "Frame time: " .. ShroudDeltaTime)
+end
+
+ShroudOnConsoleInput¶
+
+ShroudOnConsoleInput(inputType: string, sourcePlayer: string, message: string)
+
+inputType (string): the chat channel/type name, e.g. "Say", "Whisper", "Party" (from the message's channel).
+
+sourcePlayer (string): the display name of the player who sent the line.
+
+message (string): the full message text as it appears in chat.
+
+Fires once for each incoming chat/console line. It is a notification only — the return value is ignored and the message is not altered.
+
+function ShroudOnConsoleInput(inputType, sourcePlayer, message)
+  if inputType == "Whisper" then
+    ShroudConsoleLog(sourcePlayer .. " whispered you.")
+  end
+end
+
+ShroudOnExperienceGain¶
+
+ShroudOnExperienceGain(experienceType: string, amount: number)
+
+experienceType (string): "Adventurer" or "Producer".
+
+amount (number): the experience just gained (always positive; the callback only fires when the delta is greater than zero).
+
+Fires when the player's character experience increases. ShroudOnExperienceChanged is an accepted alias for the same event — define either name (not both). See ShroudOnExperienceChanged.
+
+function ShroudOnExperienceGain(experienceType, amount)
+  if experienceType == "Producer" then
+    sessionCraftXP = (sessionCraftXP or 0) + amount
+  end
+end
+
+ShroudOnExperienceChanged¶
+
+ShroudOnExperienceChanged(experienceType: string, amount: number)
+
+experienceType (string): "Adventurer" or "Producer".
+
+amount (number): the experience just gained (positive).
+
+Alias of ShroudOnExperienceGain — same arguments, same firing rule. The loader accepts either name and prefers ShroudOnExperienceGain if both happen to be defined, so define only one.
+
+function ShroudOnExperienceChanged(experienceType, amount)
+  ShroudConsoleLog("Gained " .. amount .. " " .. experienceType .. " XP")
+end
+
+ShroudOnMouseOver¶
+
+ShroudOnMouseOver(id: number, kind: UI)
+
+id (number): the 0-based index of the widget within its kind's list (the value returned when you created it).
+
+kind (enum UI): which widget kind — UI.Button, UI.Panel, UI.Image, or UI.Text.
+
+Fires when the mouse enters a Lua-created widget that has an in/out listener attached (ShroudSetInOutListener). Widgets without the listener do not report.
+
+function ShroudOnMouseOver(id, kind)
+  if kind == UI.Button and id == myButtonId then
+    ShroudSetButtonColor(myButtonId, ButtonMode.Normal, "#FFFF00FF")
+  end
+end
+
+ShroudOnMouseOut¶
+
+ShroudOnMouseOut(id: number, kind: UI)
+
+id (number): the 0-based index of the widget within its kind's list.
+
+kind (enum UI): the widget kind — UI.Button, UI.Panel, UI.Image, or UI.Text.
+
+Fires when the mouse leaves a Lua widget that has an in/out listener (ShroudSetInOutListener). Gotcha: the primary listener path passes kind as a UI enum value, but a secondary pointer-exit path passes it as a plain string ("Button", "Panel", "Image", "Text"); compare defensively if you branch on kind here.
+
+function ShroudOnMouseOut(id, kind)
+  if id == myButtonId then
+    ShroudSetButtonColor(myButtonId, ButtonMode.Normal, "#FFFFFFFF")
+  end
+end
+
+ShroudOnMouseClick¶
+
+ShroudOnMouseClick(id: number, kind: UI)
+
+id (number): the 0-based index of the clicked widget within its kind's list.
+
+kind (enum UI): the widget kind — UI.Button, UI.Panel, UI.Image, or UI.Text.
+
+Fires when a Lua widget that has a click listener (ShroudSetClickListener) is clicked.
+
+function ShroudOnMouseClick(id, kind)
+  if kind == UI.Image and id == closeIconId then
+    ShroudHideLuaUI()
+  end
+end
+
+ShroudOnInputChange¶
+
+ShroudOnInputChange(id: number, text: string)
+
+id (number): the 0-based index of the input widget (as returned by ShroudUIInput).
+
+text (string): the input field's current text after the change.
+
+Fires whenever the text of a Lua input field changes.
+
+function ShroudOnInputChange(id, text)
+  if id == searchBoxId then
+    lastQuery = text
+  end
+end
+
+ShroudOnToggleChange¶
+
+ShroudOnToggleChange(id: number, isOn: boolean)
+
+id (number): the 0-based index of the toggle widget (as returned by ShroudUIToggle).
+
+isOn (boolean): the toggle's new state.
+
+Fires whenever a Lua toggle's checked state changes.
+
+function ShroudOnToggleChange(id, isOn)
+  if id == showTimerToggleId then
+    if isOn then ShroudShowObject(timerPanelId, UI.Panel)
+    else ShroudHideObject(timerPanelId, UI.Panel) end
+  end
+end
+
+ShroudOnSceneLoaded¶
+
+ShroudOnSceneLoaded(sceneName: string)
+
+sceneName (string): the display name of the scene that finished loading (e.g. the friendly area name, not necessarily the raw scene id).
+
+Fires after a non-login scene finishes loading. It does not fire for the login scene — that path calls ShroudOnLogOut instead.
+
+function ShroudOnSceneLoaded(sceneName)
+  ShroudConsoleLog("Entered: " .. sceneName)
+  inTown = (sceneName ~= nil)
+end
+
+ShroudOnSceneUnloaded¶
+
+ShroudOnSceneUnloaded()
+
+No arguments.
+
+Fires when a scene unloads (leaving an area, before the next scene loads). Use it to tear down per-scene state or pause work while no world scene is active.
+
+function ShroudOnSceneUnloaded()
+  trackedTargets = {}
+end
+
+ShroudOnLogOut¶
+
+ShroudOnLogOut()
+
+No arguments.
+
+Fires when the login scene loads — that is, when the player logs out or otherwise returns to the login screen. Saved variables are flushed by the host around this point, so this is a natural place to finalize session totals. Note the name uses LogOut (capital O).
+
+function ShroudOnLogOut()
+  ShroudSetSavedVar("sessionCraftXP", sessionCraftXP or 0)
+  ShroudFlushSavedVars()
+end
+
+ShroudOnPlaySound¶
+
+ShroudOnPlaySound(clipName: string)
+
+clipName (string): the name of the audio clip being played (the clip asset's name).
+
+Fires when a UI audio clip is played through the game's audio manager. It reports UI sounds, not arbitrary world audio.
+
+function ShroudOnPlaySound(clipName)
+  if clipName == "ui_error" then
+    errorBlinkUntil = ShroudTime + 1.0
+  end
+end
+
+ShroudOnPlayFX¶
+
+ShroudOnPlayFX(fxName: string, on: boolean)
+
+fxName (string): the name of the FX object (its GameObject name).
+
+on (boolean): true when the effect starts, false when it ends.
+
+Fires when a visual FX starts or ends near the local player. Suppressed while the player is in GM ghost mode. Each effect fires once for its start and once for its end.
+
+function ShroudOnPlayFX(fxName, on)
+  if on then
+    activeFx[fxName] = true
+  else
+    activeFx[fxName] = nil
+  end
+end
+
+ShroudOnPlayEmote¶
+
+ShroudOnPlayEmote(emote: string)
+
+emote (string): the name of the emote that was performed.
+
+Fires when the local player performs an emote via ShroudPlayEmote — a self-action the addon (or player) just triggered, and only when the emote actually plays (the avatar must own it and be on the ground). It does not report other players' emotes.
+
+function ShroudOnPlayEmote(emote)
+  ShroudConsoleLog("You performed: " .. emote)
+end
+
+ShroudOnDisableScript¶
+
+ShroudOnDisableScript()
+
+No arguments.
+
+Fires when the addon is disabled (from the addon UI or by the host), just before the addon stops running. Use it to persist state and clean up. After it returns the addon is marked disabled and its other callbacks stop firing.
+
+function ShroudOnDisableScript()
+  ShroudSetSavedVar("sessionCraftXP", sessionCraftXP or 0)
+  ShroudFlushSavedVars()
+  ShroudDestroyObject(panelId, UI.Panel)
+end
+
+Per-frame globals and constants¶
+
+These are values the host writes into the Lua environment, not functions the addon calls. Read them like any Lua variable (local x = ShroudPlayerX); do not invoke them. The per-frame values are refreshed by the host on every frame while at least one addon is enabled, so a fresh read each frame reflects current state. (Internally most use a dirty-check and are only re-pushed when they change, but the value an addon reads is always current.) The constants below are written once, before any addon file runs, so they are safe to read at the top level of an addon file as well as inside callbacks.
+
+Per-frame values¶
+
+Global
+Type
+Meaning
+Updated
+
+ShroudPlayerX
+number
+Local player world X position
+Every frame
+
+ShroudPlayerY
+number
+Local player world Y position
+Every frame
+
+ShroudPlayerZ
+number
+Local player world Z position
+Every frame
+
+ShroudPlayerCurrentHealth
+number
+Local player current health
+Every frame
+
+ShroudPlayerCurrentFocus
+number
+Local player current focus
+Every frame
+
+ShroudPlayerGold
+number
+Local player gold total
+Every frame
+
+ShroudTime
+number
+Engine time in seconds since start (Time.time)
+Every frame
+
+ShroudDeltaTime
+number
+Frame delta in seconds, clamped at the Maximum Allowed Timestep (~0.1 s). Use this to pace animation
+Every frame
+
+ShroudRealDeltaTime
+number
+Unclamped wall-clock frame delta in seconds; reflects the true length of a stall
+Every frame
+
+ShroudServerTime
+string
+Server UTC time, formatted as a string (updated once per whole second)
+Every frame
+
+ShroudMouseX
+number
+Mouse X in pixels
+Every frame
+
+ShroudMouseY
+number
+Mouse Y in pixels, top-left origin (screenHeight - mouseY)
+Every frame
+
+Set-once constants¶
+
+Constant
+Type
+Meaning
+
+ShroudLuaApiVersion
+number
+Current API version. Presently 3
+
+ShroudLuaPath
+string
+Absolute path to the addon's Lua folder
+
+ShroudDataPath
+string
+Absolute path to the addon data folder
+
+InvalidStatResult
+number
+The numeric failure sentinel, -999. Stat/value getters return this when a value is hidden or the query is invalid
+
+Enums and helper types¶
+
+Registered static types available to every addon. Reference members by dotted name, e.g. UI.Image, AudioType.OGGVORBIS, TextAnchor.MiddleCenter.
+
+UI — widget/object kind: Panel, Image, Text, Button, None, Toggle, Input.
+
+ButtonMode — button visual state for ShroudSetButtonColor/ShroudSetButtonImage: Highlighted, Pressed, Disabled, Normal, None.
+
+Transition — button transition for ShroudSetButtonTransition: None, ColorTint, SpriteSwap.
+
+ContentType — input field content type for ShroudSetInputContentType: Standard, Autocorrected, IntegerNumber, DecimalNumber, Alphanumeric, Name, EmailAddress, Password, Pin, Custom.
+
+AudioType — Unity's audio-format enum passed to ShroudLoadSound. Practical members: WAV, OGGVORBIS, MPEG, AIFF (the enum also carries tracker/console formats such as IT, MOD, S3M, XM, plus UNKNOWN).
+
+TextAnchor — Unity's text alignment enum passed to ShroudSetTextAlignment: UpperLeft, UpperCenter, UpperRight, MiddleLeft, MiddleCenter, MiddleRight, LowerLeft, LowerCenter, LowerRight.
+
+LuaVector2 — fields x, y (number). Returned by ShroudGetPosition.
+
+LuaVector3 — fields x, y, z (number). Returned by ShroudWorldToScreenPoint.
+
+Examples¶
+
+Reading a few per-frame globals inside ShroudOnUpdate:
+
+function ShroudOnUpdate()
+    -- current player position and vitals
+    local x, y, z = ShroudPlayerX, ShroudPlayerY, ShroudPlayerZ
+    local hp = ShroudPlayerCurrentHealth
+
+    -- pace an animation with the clamped delta, but measure stalls with the real one
+    myTimer = myTimer + ShroudDeltaTime
+    if ShroudRealDeltaTime > 0.25 then
+        ShroudConsoleLog("frame stall: " .. ShroudRealDeltaTime .. "s")
+    end
+
+    -- ShroudMouseY is top-left origin (screenHeight - mouseY)
+    ShroudConsoleLog("mouse: " .. ShroudMouseX .. ", " .. ShroudMouseY)
+end
+
+Passing an enum value to a widget call:
+
+-- create an image widget, then recolor it via its UI kind
+local id = ShroudUIImage(100, 100, 64, 64, textureId, 0, UI.None, 0)
+ShroudSetColor(id, UI.Image, "#FF8800")
+
+-- load an OGG sound using the AudioType enum
+ShroudLoadSound("sfx/ping.ogg", AudioType.OGGVORBIS)
+
+Gotchas¶
+
+ShroudDeltaTime is clamped; ShroudRealDeltaTime is not. ShroudDeltaTime never exceeds the Maximum Allowed Timestep (~0.1 s), so a longer frame (a load hitch, an alt-tab) reports at most ~0.1 s. Use it to advance animation smoothly. When you need the true elapsed wall-clock time for a frame — for example to detect or measure a stall — read ShroudRealDeltaTime, which is unclamped.
+
+ShroudMouseY uses a top-left origin. It is screenHeight - mouseY, so 0 is the top of the screen and it increases downward, opposite Unity's bottom-left Input.mousePosition. ShroudMouseX matches Unity directly.
+
+Character and stats¶
+
+These functions read the local player: identity, orientation, combat state, character stats, active buffs, and experience pools. They are only valid inside a callback. Nearly all short-circuit when there is no local player yet and return a sentinel: numbers return -999 (the global InvalidStatResult) or 0, stat names return "INVALID", buff names return "Invalid", buff times return -1, and list/table getters return nil. Stat indices are 0-based and run 0 .. ShroudGetStatCount()-1, but many stat slots are hidden from Lua and yield the sentinel even for a valid index.
+
+Function
+Call
+What it does
+
+ShroudGetPlayerName
+ShroudGetPlayerName()
+Local player display name
+
+ShroudGetPlayerCombatMode
+ShroudGetPlayerCombatMode()
+True while in combat
+
+ShroudGetPlayerOrientation
+ShroudGetPlayerOrientation()
+Facing angle in degrees
+
+ShroudGetStatCount
+ShroudGetStatCount()
+Number of stat slots
+
+ShroudGetStatValueByNumber
+ShroudGetStatValueByNumber(number)
+Stat value by index
+
+ShroudGetStatNameByNumber
+ShroudGetStatNameByNumber(number)
+Stat enum name by index
+
+ShroudGetStatDescriptionByNumber
+ShroudGetStatDescriptionByNumber(number)
+Stat display name by index
+
+ShroudGetStatValueByName
+ShroudGetStatValueByName(statName)
+Stat value by name
+
+ShroudGetBuffCount
+ShroudGetBuffCount()
+Count of active effects
+
+ShroudGetBuffName
+ShroudGetBuffName(index)
+Buff rune name by index
+
+ShroudGetBuffDescription
+ShroudGetBuffDescription(index)
+Buff display name by index
+
+ShroudGetBuffTimeRemaining
+ShroudGetBuffTimeRemaining(index)
+Seconds left on a buff
+
+ShroudGetBuffIcon
+ShroudGetBuffIcon(index)
+Texture id of a buff's real skill icon
+
+ShroudGetBuffTooltip
+ShroudGetBuffTooltip(index)
+Native-matching tooltip text for a buff
+
+ShroudGetPlayerBuff
+ShroudGetPlayerBuff()
+Buffs grouped by rune
+
+ShroudGetPooledAdventurerExperience
+ShroudGetPooledAdventurerExperience()
+Unspent pooled adventurer XP
+
+ShroudGetPooledProducerExperience
+ShroudGetPooledProducerExperience()
+Unspent pooled producer XP
+
+ShroudGetTotalAdventurerExperience
+ShroudGetTotalAdventurerExperience()
+Total adventurer XP
+
+ShroudGetTotalProducerExperience
+ShroudGetTotalProducerExperience()
+Total producer XP
+
+ShroudGetAttenuationAdventurerStatus
+ShroudGetAttenuationAdventurerStatus()
+Adventurer XP attenuated now
+
+ShroudGetAttenuationProducerStatus
+ShroudGetAttenuationProducerStatus()
+Producer XP attenuated now
+
+ShroudGetPlayerName¶
+
+ShroudGetPlayerName() -> string
+
+Returns: string, the local player's display name; "none" when there is no local player.
+
+function ShroudOnStart()
+    ShroudConsoleLog("Playing as " .. ShroudGetPlayerName())
+end
+
+ShroudGetPlayerCombatMode¶
+
+ShroudGetPlayerCombatMode() -> boolean
+
+Returns: boolean, true while the player is in combat, otherwise false (also false when there is no player).
+
+function ShroudOnUpdate(dt)
+    if ShroudGetPlayerCombatMode() then
+        ShroudConsoleLog("In combat")
+    end
+end
+
+ShroudGetPlayerOrientation¶
+
+ShroudGetPlayerOrientation() -> number
+
+Returns: number, the player's facing as the rounded Y euler angle in degrees (0 to 360); 0 when there is no player.
+
+function ShroudOnUpdate(dt)
+    local facing = ShroudGetPlayerOrientation()
+    ShroudConsoleLog("Facing " .. facing .. " degrees")
+end
+
+ShroudGetStatCount¶
+
+ShroudGetStatCount() -> number
+
+Returns: number, the total count of stat slots (the size of the stat enum). Valid stat indices are 0 .. count-1.
+
+Notes: This is the full slot count, not the count of readable stats. Many slots are hidden from Lua, so iterating all of them will still hit sentinels on the hidden ones.
+
+for i = 0, ShroudGetStatCount() - 1 do
+    local name = ShroudGetStatNameByNumber(i)
+    if name ~= "INVALID" then
+        ShroudConsoleLog(name .. " = " .. ShroudGetStatValueByNumber(i))
+    end
+end
+
+ShroudGetStatValueByNumber¶
+
+ShroudGetStatValueByNumber(number: number) -> number
+
+number: number, the 0-based stat index in 0 .. ShroudGetStatCount()-1.
+
+Returns: number, the stat value; -999 (InvalidStatResult) when there is no player, the index is out of range, or the stat is hidden from Lua.
+
+local str = ShroudGetStatValueByNumber(0)
+if str ~= InvalidStatResult then
+    ShroudConsoleLog("Stat 0 = " .. str)
+end
+
+ShroudGetStatNameByNumber¶
+
+ShroudGetStatNameByNumber(number: number) -> string
+
+number: number, the 0-based stat index in 0 .. ShroudGetStatCount()-1.
+
+Returns: string, the stat's internal enum name (for example Strength); "INVALID" when there is no player, the index is out of range, or the stat is hidden.
+
+Notes: This is the code name. Use ShroudGetStatDescriptionByNumber for the localized label.
+
+ShroudConsoleLog("Stat 0 name: " .. ShroudGetStatNameByNumber(0))
+
+ShroudGetStatDescriptionByNumber¶
+
+ShroudGetStatDescriptionByNumber(number: number) -> string
+
+number: number, the 0-based stat index in 0 .. ShroudGetStatCount()-1.
+
+Returns: string, the stat's localized display name; "INVALID" when there is no player, the index is out of range, or the stat is hidden.
+
+ShroudConsoleLog("Stat 0 label: " .. ShroudGetStatDescriptionByNumber(0))
+
+ShroudGetStatValueByName¶
+
+ShroudGetStatValueByName(statName: string) -> number
+
+statName: string, the stat's internal enum name (as returned by ShroudGetStatNameByNumber, for example Strength).
+
+Returns: number, the stat value; 0.0 when the name is a real stat but hidden from Lua; -999 (InvalidStatResult) when there is no player or the name is unknown.
+
+Notes: The two failure cases differ. A hidden-but-real stat returns 0.0, so treat 0.0 as "not readable" rather than a true zero when the stat could be hidden.
+
+local dex = ShroudGetStatValueByName("Dexterity")
+if dex ~= InvalidStatResult then
+    ShroudConsoleLog("Dexterity = " .. dex)
+end
+
+ShroudGetBuffCount¶
+
+ShroudGetBuffCount() -> number
+
+Returns: number, the count of active character effects on the player; 0 when there is no player or no effects.
+
+Notes: This counts raw effect entries, which is the index space for ShroudGetBuffName, ShroudGetBuffDescription, and ShroudGetBuffTimeRemaining. It is not the grouped-by-rune count returned by ShroudGetPlayerBuff.
+
+local n = ShroudGetBuffCount()
+for i = 0, n - 1 do
+    ShroudConsoleLog(ShroudGetBuffName(i) .. ": " .. ShroudGetBuffTimeRemaining(i) .. "s")
+end
+
+ShroudGetBuffName¶
+
+ShroudGetBuffName(index: number) -> string
+
+index: number, the 0-based effect index in 0 .. ShroudGetBuffCount()-1.
+
+Returns: string, the buff's rune name; "Invalid" when there is no player or the index is out of range.
+
+Notes: The sentinel here is "Invalid" (mixed case), unlike the stat functions which use "INVALID".
+
+ShroudConsoleLog("First buff: " .. ShroudGetBuffName(0))
+
+ShroudGetBuffDescription¶
+
+ShroudGetBuffDescription(index: number) -> string
+
+index: number, the 0-based effect index in 0 .. ShroudGetBuffCount()-1.
+
+Returns: string, the buff's localized display name; "Invalid" when there is no player, the index is out of range, or the effect has no display name.
+
+Same as ShroudGetBuffName but returns the localized label instead of the rune name.
+
+ShroudConsoleLog("First buff label: " .. ShroudGetBuffDescription(0))
+
+ShroudGetBuffTimeRemaining¶
+
+ShroudGetBuffTimeRemaining(index: number) -> number
+
+index: number, the 0-based effect index in 0 .. ShroudGetBuffCount()-1.
+
+Returns: number, seconds remaining on the effect; -1 when there is no player or the index is out of range.
+
+local secs = ShroudGetBuffTimeRemaining(0)
+if secs >= 0 then
+    ShroudConsoleLog("Expires in " .. secs .. "s")
+end
+
+ShroudGetBuffIcon¶
+
+ShroudGetBuffIcon(index: number) -> number
+
+index: number, the 0-based effect index in 0 .. ShroudGetBuffCount()-1.
+
+Returns: number, a texture id for the buff's real in-game skill icon (the same graphic the game's buff bar shows), usable directly with ShroudDrawTexture / ShroudDrawTextureTooltip. Returns -1 when there is no player, the index is out of range, or the rune has no skill icon (creature/NPC runes). (API v3)
+
+Notes: The icon is resolved once per skill and cached, so calling this every frame is cheap. This means an addon no longer has to ship its own artwork to show recognizable buff icons.
+
+local tex = ShroudGetBuffIcon(0)
+if tex >= 0 then
+    ShroudDrawTexture(40, 220, 40, 40, tex)
+end
+
+ShroudGetBuffTooltip¶
+
+ShroudGetBuffTooltip(index: number) -> string
+
+index: number, the 0-based effect index in 0 .. ShroudGetBuffCount()-1.
+
+Returns: string, a plain-text tooltip mirroring the game's own buff bar: the skill name, the effect's description line (when it shows a tooltip), and the time remaining, each on its own line. Empty string when there is no player or the index is out of range. NGUI markup is already stripped, so it draws cleanly through the immediate-mode GUI. (API v3)
+
+Notes: Pair with ShroudDrawTextureTooltip so hovering an icon tells the player which skill it is.
+
+local tex = ShroudGetBuffIcon(0)
+if tex >= 0 then
+    ShroudDrawTextureTooltip(40, 220, 40, 40, tex, ShroudGetBuffTooltip(0))
+end
+
+ShroudGetPlayerBuff¶
+
+ShroudGetPlayerBuff() -> list
+
+Returns: list of rune tables, or nil when there is no player. Each entry is a RuneEffects table with fields RuneName (string), RuneId (number), IsDebuff (boolean), IconId (number — texture id of the real skill icon, or -1; same value as ShroudGetBuffIcon, API v3), StackCount (number), and Effects (a list of tables, each { Description, Value, CurrentDuration, TotalDuration, TotalTick }).
+
+Notes: Effects are grouped by rune name, so this list is shorter than ShroudGetBuffCount when one rune applies several effect components. StackCount is the number of grouped effect entries, an upper bound on true stacks. The result is a fresh snapshot per call; build it once per frame rather than per widget.
+
+local buffs = ShroudGetPlayerBuff()
+if buffs then
+    for _, rune in ipairs(buffs) do
+        local tag = rune.IsDebuff and "debuff" or "buff"
+        ShroudConsoleLog(rune.RuneName .. " (" .. tag .. ") x" .. rune.StackCount)
+    end
+end
+
+ShroudGetPooledAdventurerExperience¶
+
+ShroudGetPooledAdventurerExperience() -> number
+
+Returns: number, the player's unspent pooled adventurer experience; 0 when there is no player or character data.
+
+ShroudConsoleLog("Pooled adv XP: " .. ShroudGetPooledAdventurerExperience())
+
+ShroudGetPooledProducerExperience¶
+
+ShroudGetPooledProducerExperience() -> number
+
+Returns: number, the player's unspent pooled producer experience; 0 when there is no player or character data.
+
+Same as ShroudGetPooledAdventurerExperience but for the producer pool.
+
+ShroudConsoleLog("Pooled prod XP: " .. ShroudGetPooledProducerExperience())
+
+ShroudGetTotalAdventurerExperience¶
+
+ShroudGetTotalAdventurerExperience() -> number
+
+Returns: number, the player's total accumulated adventurer experience; 0 when there is no player or character data.
+
+ShroudConsoleLog("Total adv XP: " .. ShroudGetTotalAdventurerExperience())
+
+ShroudGetTotalProducerExperience¶
+
+ShroudGetTotalProducerExperience() -> number
+
+Returns: number, the player's total accumulated producer experience; 0 when there is no player or character data.
+
+Same as ShroudGetTotalAdventurerExperience but for producer experience.
+
+ShroudConsoleLog("Total prod XP: " .. ShroudGetTotalProducerExperience())
+
+ShroudGetAttenuationAdventurerStatus¶
+
+ShroudGetAttenuationAdventurerStatus() -> boolean
+
+Returns: boolean, true if adventurer experience is currently being attenuated (a reduced XP rate), otherwise false.
+
+Notes: Reports true when the last adventurer attenuation event was under 15 minutes (900 seconds) ago.
+
+if ShroudGetAttenuationAdventurerStatus() then
+    ShroudConsoleLog("Adventurer XP is attenuated")
+end
+
+ShroudGetAttenuationProducerStatus¶
+
+ShroudGetAttenuationProducerStatus() -> boolean
+
+Returns: boolean, true if producer experience is currently being attenuated, otherwise false.
+
+Same as ShroudGetAttenuationAdventurerStatus but for producer experience (also a 15-minute window).
+
+if ShroudGetAttenuationProducerStatus() then
+    ShroudConsoleLog("Producer XP is attenuated")
+end
+
+Pet¶
+
+These two functions read the player's active primary pet (a tamed creature or a summoned combat pet). Both take no arguments and both return nil when there is no local player or no primary pet out, so always nil-check before indexing. ShroudGetPetInfo returns a single stats table; ShroudGetPetBuff returns the same rune-effect list shape as the player buff calls. Note that several PetInfo fields (MoveSpeed, MoveRate, StrengthPower, TauntPower) are read off the local player, not the pet entity: three are the player's Taming skill stats and MoveRate is the player's general movement-rate stat.
+
+Function
+Call
+What it does
+
+ShroudGetPetInfo
+ShroudGetPetInfo()
+Returns a stats table for the active pet
+
+ShroudGetPetBuff
+ShroudGetPetBuff()
+Returns the active pet's rune buffs/debuffs
+
+ShroudGetPetInfo¶
+
+ShroudGetPetInfo() -> table (or nil)
+
+Returns: a PetInfo table, or nil if there is no local player or no primary pet. Fields:
+
+Name (string) — pet display name.
+
+Level (number) — adventurer level.
+
+isSummon (boolean) — true if the pet is a summon, false if it is a tamed creature.
+
+Strength, Dexterity, Intelligence (number) — pet attributes.
+
+CurrentHealth, MaxHealth (number) — integer health values.
+
+HealthRegen, HealthRegenCombat (number) — out-of-combat and in-combat health per second.
+
+AttackSpeed (number).
+
+Absorb, Resist, MagicResist (number) — total damage absorption, total damage resistance, magic resistance.
+
+CriticalHit (number) — critical hit chance as a percentage.
+
+TauntPower, StrengthPower, MoveSpeed, MoveRate (number).
+
+Notes: MoveSpeed, StrengthPower, and TauntPower are read from the local player's Taming stats (TamingMoveSpeed, TamingStrength, TamingTaunt), and MoveRate is read from the local player's general movement-rate stat (MoveRate), not from the pet entity — so all four reflect your own character rather than the creature. CriticalHit is a derived percentage, not a raw stat.
+
+local pet = ShroudGetPetInfo()
+if pet then
+    ShroudConsoleLog(string.format("%s (Lv %d) HP %d/%d, crit %.1f%%",
+        pet.Name, pet.Level, pet.CurrentHealth, pet.MaxHealth, pet.CriticalHit))
+    if pet.CurrentHealth < pet.MaxHealth * 0.3 then
+        ShroudConsoleLog(pet.Name .. " is low on health")
+    end
+else
+    ShroudConsoleLog("No pet out")
+end
+
+ShroudGetPetBuff¶
+
+ShroudGetPetBuff() -> list (or nil)
+
+Returns: a list of RuneEffects tables for the active pet, or nil if there is no local player or no primary pet. An empty list means the pet has no active effects. Each RuneEffects table has:
+
+RuneName (string) — the rune's name.
+
+RuneId (number) — the rune id.
+
+IsDebuff (boolean) — true if the rune's disposition is hostile.
+
+StackCount (number) — count of grouped effect entries under this rune. A single rune that applies several effect components counts each one, so this is an upper bound on true stacks, not an exact stack count.
+
+Effects (list) — one BuffEffects table per effect component, each with Description (string, the stat type), Value (number), CurrentDuration (number, seconds remaining), TotalDuration (number, seconds), and TotalTick (number, tick length in seconds).
+
+Notes: this is the same shape and grouping as the player buff call; effects are grouped by rune name in first-seen order.
+
+local buffs = ShroudGetPetBuff()
+if buffs then
+    for i = 1, #buffs do
+        local rune = buffs[i]
+        local kind = rune.IsDebuff and "debuff" or "buff"
+        ShroudConsoleLog(string.format("%s [%s] x%d", rune.RuneName, kind, rune.StackCount))
+        for j = 1, #rune.Effects do
+            local e = rune.Effects[j]
+            ShroudConsoleLog(string.format("  %s = %.1f (%.0fs left)",
+                e.Description, e.Value, e.CurrentDuration))
+        end
+    end
+end
+
+Target¶
+
+These functions read the player's current target, resolved exactly like the on-screen target frame: the locked target if there is one, otherwise the closest valid combatant. Only combatants with replicated state count, so ShroudHasTarget gates everything else. Every value mirrors what the target frame shows and never more, so hidden-health creatures report a full bar and player targets expose only vitals. When there is no target the getters return their sentinel: numbers return -1, stat lookups return -999 (the global InvalidStatResult), names return "None" or "Invalid", and ShroudGetTargetBuff returns nil.
+
+Function
+Call
+What it does
+
+ShroudHasTarget
+ShroudHasTarget()
+True if a target is currently resolved
+
+ShroudGetTargetName
+ShroudGetTargetName()
+Target display name
+
+ShroudGetTargetId
+ShroudGetTargetId()
+Session-local id for detecting switches
+
+ShroudIsTargetDead
+ShroudIsTargetDead()
+True if the target is dead
+
+ShroudIsTargetHealthHidden
+ShroudIsTargetHealthHidden()
+True while the target hides its health
+
+ShroudGetTargetCurrentHealth
+ShroudGetTargetCurrentHealth()
+Current health (max while hidden)
+
+ShroudGetTargetMaxHealth
+ShroudGetTargetMaxHealth()
+Maximum health
+
+ShroudGetTargetCurrentFocus
+ShroudGetTargetCurrentFocus()
+Current focus
+
+ShroudGetTargetMaxFocus
+ShroudGetTargetMaxFocus()
+Maximum focus
+
+ShroudGetTargetBuff
+ShroudGetTargetBuff()
+Buffs grouped by rune, with effects
+
+ShroudGetTargetBuffCount
+ShroudGetTargetBuffCount()
+Raw effect-component count
+
+ShroudGetTargetBuffName
+ShroudGetTargetBuffName(index)
+Rune name of one effect
+
+ShroudGetTargetBuffDescription
+ShroudGetTargetBuffDescription(index)
+Display description of one effect
+
+ShroudGetTargetBuffTimeRemaining
+ShroudGetTargetBuffTimeRemaining(index)
+Seconds left on one effect
+
+ShroudGetTargetBuffIcon
+ShroudGetTargetBuffIcon(index)
+Texture id of a target buff's skill icon
+
+ShroudGetTargetBuffTooltip
+ShroudGetTargetBuffTooltip(index)
+Native-matching tooltip for a target buff
+
+ShroudGetTargetStatValueByNumber
+ShroudGetTargetStatValueByNumber(number)
+Target stat by index
+
+ShroudGetTargetStatValueByName
+ShroudGetTargetStatValueByName(statName)
+Target stat by name
+
+ShroudHasTarget¶
+
+ShroudHasTarget() -> boolean
+
+Returns: boolean. true when a target is resolved and has replicated combat state, false otherwise.
+
+Notes: use this as the guard before calling any other Target function; the rest return their no-target sentinels when this is false.
+
+if ShroudHasTarget() then
+    ShroudConsoleLog("Target: " .. ShroudGetTargetName())
+else
+    ShroudConsoleLog("No target")
+end
+
+ShroudGetTargetName¶
+
+ShroudGetTargetName() -> string
+
+Returns: string, the target's display name. "None" when there is no target.
+
+local name = ShroudGetTargetName()
+if name ~= "None" then
+    ShroudConsoleLog("Fighting " .. name)
+end
+
+ShroudGetTargetId¶
+
+ShroudGetTargetId() -> number
+
+Returns: number, a session-local id stable while the target object lives. -1 when there is no target.
+
+Notes: the value is not a persistent database id; it only serves to detect that the target changed between frames. Cache it and compare to spot a target switch.
+
+local lastId = -1
+ShroudOnUpdate = function()
+    local id = ShroudGetTargetId()
+    if id ~= lastId then
+        lastId = id
+        if id ~= -1 then
+            ShroudConsoleLog("New target: " .. ShroudGetTargetName())
+        end
+    end
+end
+
+ShroudIsTargetDead¶
+
+ShroudIsTargetDead() -> boolean
+
+Returns: boolean. true when the current target is dead, false when it is alive or when there is no target.
+
+if ShroudHasTarget() and ShroudIsTargetDead() then
+    ShroudConsoleLog(ShroudGetTargetName() .. " is dead")
+end
+
+ShroudIsTargetHealthHidden¶
+
+ShroudIsTargetHealthHidden() -> boolean
+
+Returns: boolean. true while the target hides its health bar, false when the bar is visible or there is no target.
+
+Notes: while this is true, ShroudGetTargetCurrentHealth reports the target's max health, matching the stock target frame. Check this before treating current health as a real value.
+
+if ShroudIsTargetHealthHidden() then
+    ShroudConsoleLog(ShroudGetTargetName() .. " conceals its health")
+end
+
+ShroudGetTargetCurrentHealth¶
+
+ShroudGetTargetCurrentHealth() -> number
+
+Returns: number, the target's current health. -1 when there is no target.
+
+Notes: when the target hides its health (ShroudIsTargetHealthHidden is true) this returns the max health, not the true current value, exactly as the target frame displays it.
+
+if ShroudHasTarget() then
+    local cur = ShroudGetTargetCurrentHealth()
+    local max = ShroudGetTargetMaxHealth()
+    ShroudConsoleLog("HP " .. cur .. " / " .. max)
+end
+
+ShroudGetTargetMaxHealth¶
+
+ShroudGetTargetMaxHealth() -> number
+
+Returns: number, the target's maximum health. -1 when there is no target.
+
+local max = ShroudGetTargetMaxHealth()
+if max > 0 then
+    local pct = 100 * ShroudGetTargetCurrentHealth() / max
+    ShroudConsoleLog(string.format("Target at %.0f%%", pct))
+end
+
+ShroudGetTargetCurrentFocus¶
+
+ShroudGetTargetCurrentFocus() -> number
+
+Returns: number, the target's current focus. -1 when there is no target.
+
+if ShroudHasTarget() then
+    ShroudConsoleLog("Focus: " .. ShroudGetTargetCurrentFocus())
+end
+
+ShroudGetTargetMaxFocus¶
+
+ShroudGetTargetMaxFocus() -> number
+
+Returns: number, the target's maximum focus. -1 when there is no target.
+
+local maxFocus = ShroudGetTargetMaxFocus()
+if maxFocus > 0 then
+    ShroudConsoleLog("Max focus: " .. maxFocus)
+end
+
+ShroudGetTargetBuff¶
+
+ShroudGetTargetBuff() -> list
+
+Returns: a list (table) of buff entries, or nil when there is no target. Effects are grouped by rune name, so each entry is one rune. Each entry is a table with fields:
+
+RuneName (string) — the rune's name.
+
+RuneId (number) — the rune's numeric id.
+
+IsDebuff (boolean) — true when the rune's disposition is hostile.
+
+Effects (list) — one table per effect component under the rune, each with Description (string, the stat type), Value (number), CurrentDuration (number, seconds remaining), TotalDuration (number, seconds), and TotalTick (number, tick length).
+
+StackCount (number) — the number of entries in Effects; an upper bound on true stacks, since one rune can apply several effect components.
+
+Notes: this is the grouped view. It does not line up index-for-index with ShroudGetTargetBuffCount/ShroudGetTargetBuffName, which walk the raw un-grouped effect array.
+
+local buffs = ShroudGetTargetBuff()
+if buffs then
+    for i = 1, #buffs do
+        local b = buffs[i]
+        local kind = b.IsDebuff and "debuff" or "buff"
+        ShroudConsoleLog(b.RuneName .. " (" .. kind .. ", x" .. b.StackCount .. ")")
+    end
+end
+
+ShroudGetTargetBuffCount¶
+
+ShroudGetTargetBuffCount() -> number
+
+Returns: number, the count of raw effect components on the target. 0 when there is no target or the target has no effects.
+
+Notes: this counts the flat, un-grouped effect array that ShroudGetTargetBuffName, ShroudGetTargetBuffDescription, and ShroudGetTargetBuffTimeRemaining index into (0-based). It is generally larger than #ShroudGetTargetBuff(), which collapses effects by rune.
+
+local count = ShroudGetTargetBuffCount()
+for i = 0, count - 1 do
+    ShroudConsoleLog(ShroudGetTargetBuffName(i))
+end
+
+ShroudGetTargetBuffName¶
+
+ShroudGetTargetBuffName(index: number) -> string
+
+index (number): 0-based position in the raw effect array, valid range 0 to ShroudGetTargetBuffCount() - 1.
+
+Returns: string, the rune name of that effect. "Invalid" when there is no target or index is out of range.
+
+for i = 0, ShroudGetTargetBuffCount() - 1 do
+    local name = ShroudGetTargetBuffName(i)
+    local secs = ShroudGetTargetBuffTimeRemaining(i)
+    ShroudConsoleLog(string.format("%s: %.1fs", name, secs))
+end
+
+ShroudGetTargetBuffDescription¶
+
+ShroudGetTargetBuffDescription(index: number) -> string
+
+index (number): 0-based position in the raw effect array, valid range 0 to ShroudGetTargetBuffCount() - 1.
+
+Returns: string, the effect's display description. "Invalid" when there is no target or index is out of range.
+
+Notes: same raw-array indexing as ShroudGetTargetBuffName.
+
+local first = ShroudGetTargetBuffDescription(0)
+if first ~= "Invalid" then
+    ShroudConsoleLog("Top effect: " .. first)
+end
+
+ShroudGetTargetBuffTimeRemaining¶
+
+ShroudGetTargetBuffTimeRemaining(index: number) -> number
+
+index (number): 0-based position in the raw effect array, valid range 0 to ShroudGetTargetBuffCount() - 1.
+
+Returns: number, seconds left on that effect (time to the end of the current tick plus the remaining ticks). -1 when there is no target or index is out of range.
+
+local remaining = ShroudGetTargetBuffTimeRemaining(0)
+if remaining >= 0 then
+    ShroudConsoleLog(string.format("%.1f seconds left", remaining))
+end
+
+ShroudGetTargetBuffIcon¶
+
+ShroudGetTargetBuffIcon(index: number) -> number
+
+index (number): 0-based position in the raw effect array, valid range 0 to ShroudGetTargetBuffCount() - 1.
+
+Returns: number, a texture id for the target buff's real skill icon (usable with ShroudDrawTexture / ShroudDrawTextureTooltip). -1 when there is no target, the index is out of range, or the rune has no skill icon. (API v3)
+
+ShroudGetTargetBuffTooltip¶
+
+ShroudGetTargetBuffTooltip(index: number) -> string
+
+index (number): 0-based position in the raw effect array, valid range 0 to ShroudGetTargetBuffCount() - 1.
+
+Returns: string, the same native-matching plain-text tooltip as ShroudGetBuffTooltip but for the current target's buff. Empty string when there is no target or the index is out of range. (API v3)
+
+ShroudGetTargetStatValueByNumber¶
+
+ShroudGetTargetStatValueByNumber(number: number) -> number
+
+number (number): 0-based stat index, valid range 0 to ShroudGetStatCount() - 1.
+
+Returns: number, the stat value. -999 (the global InvalidStatResult) when there is no target, number is out of range, the stat is never exposed, or the target is a player and the stat is not a vital.
+
+Notes: player targets expose only their vitals (current/max health and focus); every other stat returns -999 for a player target. NPC and creature targets expose the full visible stat set. Stat indices match ShroudGetStatNameByNumber from the player Stats API.
+
+if ShroudHasTarget() then
+    for n = 0, ShroudGetStatCount() - 1 do
+        local v = ShroudGetTargetStatValueByNumber(n)
+        if v ~= -999 then
+            ShroudConsoleLog(ShroudGetStatNameByNumber(n) .. " = " .. v)
+        end
+    end
+end
+
+ShroudGetTargetStatValueByName¶
+
+ShroudGetTargetStatValueByName(statName: string) -> number
+
+statName (string): the stat's name, as returned by ShroudGetStatNameByNumber.
+
+Returns: number, the stat value. -999 (the global InvalidStatResult) when there is no target, the name is unknown, the stat is never exposed, or the target is a player and the stat is not a vital.
+
+Notes: same player-target vitals-only rule as ShroudGetTargetStatValueByNumber. Unlike the player ShroudGetStatValueByName, a hidden-but-known stat here returns -999, not 0.
+
+local str = ShroudGetTargetStatValueByName("Strength")
+if str ~= -999 then
+    ShroudConsoleLog("Target Strength: " .. str)
+end
+
+Under the mouse¶
+
+These four functions report what the cursor is currently hovering, matching the client's own tooltip resolution (world object first, then UI) but without the display gating, so an addon can read the cursor even while a mouse button is held. All four read from a single snapshot that is resolved once per engine frame (building an item tooltip formats a whole stat block, so calling all four together costs no more than calling one). Text is localized and NGUI markup is stripped, so you get plain strings. When nothing readable is under the cursor the string getters return "", the kind returns "none", and the id returns -1.
+
+Function
+Call
+What it does
+
+ShroudGetDescriptionUnderMouse
+ShroudGetDescriptionUnderMouse()
+Full tooltip text under the cursor
+
+ShroudGetNameUnderMouse
+ShroudGetNameUnderMouse()
+Title line only under the cursor
+
+ShroudGetKindUnderMouse
+ShroudGetKindUnderMouse()
+Category of the thing under the cursor
+
+ShroudGetIdUnderMouse
+ShroudGetIdUnderMouse()
+Session-local id of the hovered entity
+
+ShroudGetDescriptionUnderMouse¶
+
+ShroudGetDescriptionUnderMouse() -> string
+
+Returns: string. The full tooltip text — the title line, then the body when the tooltip has one, joined with a newline. Markup is stripped and the text is trimmed. Returns "" when nothing readable is under the cursor.
+
+Notes: For a world entity (player, NPC, item, container, object) the description falls back to the name when the entity carries no body text, so it is never empty while an entity is hovered. Resolved once per frame and shared with the other three getters.
+
+local desc = ShroudGetDescriptionUnderMouse()
+if desc ~= "" then
+    ShroudConsoleLog("Under mouse: " .. desc)
+end
+
+ShroudGetNameUnderMouse¶
+
+ShroudGetNameUnderMouse() -> string
+
+Returns: string. The title line only — item name, interact text, NPC or scene name. Markup stripped and trimmed. Returns "" when nothing readable is under the cursor.
+
+Notes: Live NPCs and other players carry no tooltip, so their name is read from the entity's display name instead of a tooltip title.
+
+local name = ShroudGetNameUnderMouse()
+if name ~= "" then
+    ShroudConsoleLog("Hovering: " .. name)
+end
+
+ShroudGetKindUnderMouse¶
+
+ShroudGetKindUnderMouse() -> string
+
+Returns: string, one of "player", "npc", "item", "container", "deco", "object", "ui", or "none" when nothing is under the cursor. A world object that matches none of the specific kinds is reported as "object", never "none".
+
+Notes: Item tooltips keep the "item" kind wherever they are shown (inventory, container, vendor list, mail), not just when the item lies in the world. Precedence for world objects: player, then npc, then item, then container, then deco, then object.
+
+local kind = ShroudGetKindUnderMouse()
+if kind == "npc" or kind == "player" then
+    ShroudConsoleLog("Mouse is over a " .. kind .. ": " .. ShroudGetNameUnderMouse())
+end
+
+ShroudGetIdUnderMouse¶
+
+ShroudGetIdUnderMouse() -> number
+
+Returns: number, a session-local id for the hovered world entity or decoration. Returns -1 when nothing is under the cursor, and also -1 for UI-sourced tooltips (an item hovered in inventory, a skill, a scene panel) where there is no world entity to identify.
+
+Notes: The id is derived from the entity's runtime instance and is stable only within the current session; do not persist it or compare it across relogs. Resolved once per frame with the other three getters.
+
+local id = ShroudGetIdUnderMouse()
+local kind = ShroudGetKindUnderMouse()
+if id ~= -1 then
+    ShroudConsoleLog(string.format("Hovered %s id=%d name=%s", kind, id, ShroudGetNameUnderMouse()))
+end
+
+Party¶
+
+These read the local player's current party. Two families exist: index-based getters keyed by a member's party UI slot, and in-scene getters keyed by a member's name. Everything fails soft and is safe to call when you are not in a party: counts return 0, names return "None" or an empty/nil list, and every health/focus getter returns -1. Note the split in name source and scope: ShroudGetPartyMemberName returns the character's full name from the whole party, while the health/focus getters (both families) only resolve members physically present in your current scene, so a valid slot index or party name can still return -1 when that member is elsewhere.
+
+Function
+Call
+What it does
+
+ShroudGetPartyMemberCount
+ShroudGetPartyMemberCount()
+Count of all party members
+
+ShroudGetPartyMemberName
+ShroudGetPartyMemberName(index)
+Full name at a party UI slot
+
+ShroudGetPartyMemberCurrentHealth
+ShroudGetPartyMemberCurrentHealth(index)
+Current health by slot
+
+ShroudGetPartyMemberMaxHealth
+ShroudGetPartyMemberMaxHealth(index)
+Max health by slot
+
+ShroudGetPartyMemberCurrentFocus
+ShroudGetPartyMemberCurrentFocus(index)
+Current focus by slot
+
+ShroudGetPartyMemberMaxFocus
+ShroudGetPartyMemberMaxFocus(index)
+Max focus by slot
+
+ShroudGetPartyMemberCountInScene
+ShroudGetPartyMemberCountInScene()
+Party members in your scene
+
+ShroudGetPartyMemberNamesInScene
+ShroudGetPartyMemberNamesInScene()
+Names of in-scene members
+
+ShroudGetPartyMemberCurrentHealthInScene
+ShroudGetPartyMemberCurrentHealthInScene(name)
+Current health by name
+
+ShroudGetPartyMemberMaxHealthInScene
+ShroudGetPartyMemberMaxHealthInScene(name)
+Max health by name
+
+ShroudGetPartyMemberCurrentFocusInScene
+ShroudGetPartyMemberCurrentFocusInScene(name)
+Current focus by name
+
+ShroudGetPartyMemberMaxFocusInScene
+ShroudGetPartyMemberMaxFocusInScene(name)
+Max focus by name
+
+ShroudGetPartyMemberCount¶
+
+ShroudGetPartyMemberCount() -> number
+
+Returns: number, the total count of members in your party (including members not in your current scene). 0 when you are not in a party.
+
+local n = ShroudGetPartyMemberCount()
+ShroudConsoleLog("Party size: " .. n)
+
+ShroudGetPartyMemberName¶
+
+ShroudGetPartyMemberName(index: number) -> string
+
+index: number, the party UI slot of the member. This is the member's assigned slot value, not a dense 0..count-1 enumeration, so a slot may be absent even when the count is higher.
+
+Returns: string, the member's full name. "None" when no member occupies that slot or you are not in a party.
+
+Notes: the name comes from the member's full character name. The in-scene health/focus getters match against the in-scene entity name, which can differ, so prefer the InScene family when reading vitals by name.
+
+local count = ShroudGetPartyMemberCount()
+for slot = 0, count - 1 do
+  local name = ShroudGetPartyMemberName(slot)
+  if name ~= "None" then
+    ShroudConsoleLog("Slot " .. slot .. ": " .. name)
+  end
+end
+
+ShroudGetPartyMemberCurrentHealth¶
+
+ShroudGetPartyMemberCurrentHealth(index: number) -> number
+
+index: number, the party UI slot of the member.
+
+Returns: number, the member's current health. -1 when you are not in a party, the slot is empty, or that member is not present in your current scene.
+
+Notes: resolves the slot to a name, then looks the member up among those in your current scene, so members in another scene always return -1 even though the slot is valid.
+
+local slot = 0
+local hp = ShroudGetPartyMemberCurrentHealth(slot)
+if hp >= 0 then
+  ShroudConsoleLog(ShroudGetPartyMemberName(slot) .. " HP: " .. hp)
+end
+
+ShroudGetPartyMemberMaxHealth¶
+
+ShroudGetPartyMemberMaxHealth(index: number) -> number
+Same as ShroudGetPartyMemberCurrentHealth but returns the member's maximum health. -1 on the same failure and out-of-scene cases.
+
+local slot = 0
+local cur = ShroudGetPartyMemberCurrentHealth(slot)
+local max = ShroudGetPartyMemberMaxHealth(slot)
+if cur >= 0 and max > 0 then
+  ShroudConsoleLog("Health: " .. cur .. " / " .. max)
+end
+
+ShroudGetPartyMemberCurrentFocus¶
+
+ShroudGetPartyMemberCurrentFocus(index: number) -> number
+Same as ShroudGetPartyMemberCurrentHealth but returns the member's current focus. -1 on the same failure and out-of-scene cases.
+
+local slot = 0
+local fp = ShroudGetPartyMemberCurrentFocus(slot)
+if fp >= 0 then
+  ShroudConsoleLog(ShroudGetPartyMemberName(slot) .. " Focus: " .. fp)
+end
+
+ShroudGetPartyMemberMaxFocus¶
+
+ShroudGetPartyMemberMaxFocus(index: number) -> number
+Same as ShroudGetPartyMemberCurrentHealth but returns the member's maximum focus. -1 on the same failure and out-of-scene cases.
+
+local slot = 0
+local cur = ShroudGetPartyMemberCurrentFocus(slot)
+local max = ShroudGetPartyMemberMaxFocus(slot)
+if cur >= 0 and max > 0 then
+  ShroudConsoleLog("Focus: " .. cur .. " / " .. max)
+end
+
+ShroudGetPartyMemberCountInScene¶
+
+ShroudGetPartyMemberCountInScene() -> number
+
+Returns: number, the count of party members present in your current scene. 0 when you are not in a party. This can be lower than ShroudGetPartyMemberCount when some members are in other scenes.
+
+local here = ShroudGetPartyMemberCountInScene()
+local total = ShroudGetPartyMemberCount()
+ShroudConsoleLog(here .. " of " .. total .. " party members in this scene")
+
+ShroudGetPartyMemberNamesInScene¶
+
+ShroudGetPartyMemberNamesInScene() -> list
+
+Returns: list of strings, the names of party members in your current scene. Empty when no party members are in the scene. When you are not in a party the list contains a single nil element rather than being empty, so guard for nil while iterating.
+
+Notes: these names are the in-scene entity names and are the correct keys to pass to the InScene health/focus getters.
+
+for _, name in ipairs(ShroudGetPartyMemberNamesInScene()) do
+  if name ~= nil then
+    local hp = ShroudGetPartyMemberCurrentHealthInScene(name)
+    ShroudConsoleLog(name .. " HP: " .. hp)
+  end
+end
+
+ShroudGetPartyMemberCurrentHealthInScene¶
+
+ShroudGetPartyMemberCurrentHealthInScene(name: string) -> number
+
+name: string, the in-scene name of a party member. Matched case-insensitively. Use a name from ShroudGetPartyMemberNamesInScene.
+
+Returns: number, that member's current health. -1 when you are not in a party or no in-scene member matches the name.
+
+local names = ShroudGetPartyMemberNamesInScene()
+if names[1] ~= nil then
+  ShroudConsoleLog("Lead HP: " .. ShroudGetPartyMemberCurrentHealthInScene(names[1]))
+end
+
+ShroudGetPartyMemberMaxHealthInScene¶
+
+ShroudGetPartyMemberMaxHealthInScene(name: string) -> number
+Same as ShroudGetPartyMemberCurrentHealthInScene but returns the member's maximum health. -1 on no match or no party.
+
+local name = ShroudGetPartyMemberNamesInScene()[1]
+if name ~= nil then
+  local cur = ShroudGetPartyMemberCurrentHealthInScene(name)
+  local max = ShroudGetPartyMemberMaxHealthInScene(name)
+  ShroudConsoleLog(name .. ": " .. cur .. " / " .. max .. " HP")
+end
+
+ShroudGetPartyMemberCurrentFocusInScene¶
+
+ShroudGetPartyMemberCurrentFocusInScene(name: string) -> number
+Same as ShroudGetPartyMemberCurrentHealthInScene but returns the member's current focus. -1 on no match or no party.
+
+local name = ShroudGetPartyMemberNamesInScene()[1]
+if name ~= nil then
+  ShroudConsoleLog(name .. " Focus: " .. ShroudGetPartyMemberCurrentFocusInScene(name))
+end
+
+ShroudGetPartyMemberMaxFocusInScene¶
+
+ShroudGetPartyMemberMaxFocusInScene(name: string) -> number
+Same as ShroudGetPartyMemberCurrentHealthInScene but returns the member's maximum focus. -1 on no match or no party.
+
+local name = ShroudGetPartyMemberNamesInScene()[1]
+if name ~= nil then
+  local cur = ShroudGetPartyMemberCurrentFocusInScene(name)
+  local max = ShroudGetPartyMemberMaxFocusInScene(name)
+  ShroudConsoleLog(name .. ": " .. cur .. " / " .. max .. " Focus")
+end
+
+Inventory, equipment, decks, emotes¶
+
+Read-only snapshots of the local player's bags, worn gear, combat decks, and emote list, plus the one avatar action in this group (ShroudPlayEmote). Every getter here is fail-soft: when the player, inventory, or deck data is not yet loaded it returns nil (never an empty list), so guard the result before iterating. Item getters return a list whose entries are fixed-order positional tuples; deck getters return a list of deck/card objects with named fields. ShroudSwitchDeck is a stub that always returns false.
+
+Function
+Call
+What it does
+
+ShroudGetInventory
+ShroudGetInventory()
+All bag items as 14-field tuples
+
+ShroudGetEquipments
+ShroudGetEquipments()
+Worn items as 7-field tuples
+
+ShroudCurrentDeck
+ShroudCurrentDeck()
+The equipped combat deck
+
+ShroudDeckList
+ShroudDeckList()
+All of the player's decks
+
+ShroudGetDeckCardList
+ShroudGetDeckCardList(name)
+Cards in one deck, counted
+
+ShroudEmoteList
+ShroudEmoteList()
+Names of emotes the player owns
+
+ShroudPlayEmote
+ShroudPlayEmote(name)
+Perform an owned emote
+
+ShroudSwitchDeck
+ShroudSwitchDeck(deck)
+Stub; always false
+
+ShroudGetInventory¶
+
+ShroudGetInventory() -> list | nil
+
+Returns: a list, one entry per item in the player's root inventory container. Each entry is a 14-field tuple, accessed positionally: [1] name (string, localized), [2] durability (number), [3] primary durability (number), [4] max durability (number), [5] weight (number), [6] quantity (number), [7] createdBy (string, crafter's full name, "" if none), [8] creationTime (string, date only, "" if unstamped), [9] creationSceneName (string), [10] length/size (number, fish length or pumpkin size, 0 for other items), [11] value (number, gold), [12] collectedBy (string, PvP trophy collector, "" if not a trophy), [13] collectedDate (string, "" if none), [14] collectedZone (string, "" if none). Returns nil when the player or inventory is not loaded.
+
+Notes: fields 12–14 (PvP trophy provenance) are appended at the end so existing positional indexes stay stable; they are empty strings on non-trophy items.
+
+local inv = ShroudGetInventory()
+if inv then
+    local totalWeight = 0
+    for _, item in ipairs(inv) do
+        totalWeight = totalWeight + item[5] * item[6]
+        ShroudConsoleLog(item[1] .. " x" .. item[6] .. " worth " .. item[11] .. "g")
+    end
+    ShroudConsoleLog("Carried weight: " .. totalWeight)
+end
+
+ShroudGetEquipments¶
+
+ShroudGetEquipments() -> list | nil
+
+Returns: a list, one entry per equipped item, each a 7-field tuple: [1] name (string, localized), [2] durability (number), [3] primary durability (number), [4] max durability (number), [5] weight (number), [6] quantity (number), [7] value (number, gold). Returns nil when the local player entity is not loaded.
+
+Notes: same leading six fields as ShroudGetInventory, but the tuple ends at value; there are no creation or trophy fields.
+
+local worn = ShroudGetEquipments()
+if worn then
+    for _, item in ipairs(worn) do
+        ShroudConsoleLog(item[1] .. ": " .. item[2] .. "/" .. item[4] .. " durability")
+    end
+end
+
+ShroudCurrentDeck¶
+
+ShroudCurrentDeck() -> table | nil
+
+Returns: the currently equipped combat deck as an object with fields name (string, deck name), quantity (number, card count), and id (string, always ""). Returns nil when no deck is equipped or the player is not loaded.
+
+local deck = ShroudCurrentDeck()
+if deck then
+    ShroudConsoleLog("Active deck: " .. deck.name .. " (" .. deck.quantity .. " cards)")
+end
+
+ShroudDeckList¶
+
+ShroudDeckList() -> list | nil
+
+Returns: a list of the player's decks, each an object with name (string), quantity (number, card count in that deck), and id (string, always ""). Returns nil when the player or deck data is not loaded.
+
+local decks = ShroudDeckList()
+if decks then
+    for _, d in ipairs(decks) do
+        ShroudConsoleLog(d.name .. " has " .. d.quantity .. " cards")
+    end
+end
+
+ShroudGetDeckCardList¶
+
+ShroudGetDeckCardList(name: string) -> list | nil
+
+name: string, the deck name to inspect. Pass a name matching one from ShroudDeckList; pass "" (or a name that does not match) to fall back to the currently equipped deck.
+
+Returns: a list of the deck's cards, one entry per distinct card, each an object with name (string, card display name), quantity (number, how many copies of that card are in the deck), and id (string, always ""). Returns nil when the player or deck data is not loaded.
+
+Notes: duplicate cards are collapsed into one entry with an incremented quantity; locked hotbar slots are added as their own single-count entries.
+
+local cards = ShroudGetDeckCardList("")  -- equipped deck
+if cards then
+    for _, c in ipairs(cards) do
+        ShroudConsoleLog(c.quantity .. "x " .. c.name)
+    end
+end
+
+ShroudEmoteList¶
+
+ShroudEmoteList() -> list | nil
+
+Returns: a list of string emote names the player currently owns (the same set shown in the emote UI). Returns nil when the player is not loaded or owns no emotes (the empty case yields nil, not an empty list).
+
+local emotes = ShroudEmoteList()
+if emotes then
+    ShroudConsoleLog("You know " .. #emotes .. " emotes")
+    for _, name in ipairs(emotes) do
+        ShroudConsoleLog(" - " .. name)
+    end
+end
+
+ShroudPlayEmote¶
+
+ShroudPlayEmote(name: string) -> boolean
+
+name: string, the emote name to perform (must be one returned by ShroudEmoteList).
+
+Returns: boolean — true when the emote starts, false otherwise (throttled, emote not owned, player off the ground, or player not loaded).
+
+Notes: this is the only avatar action in this group and is purely cosmetic. A 2-second throttle applies across all calls, the player must own the emote, and the avatar must be on the ground. A successful call fires the ShroudOnPlayEmote callback with the emote name.
+
+local emotes = ShroudEmoteList()
+if emotes and #emotes > 0 then
+    if ShroudPlayEmote(emotes[1]) then
+        ShroudConsoleLog("Performing " .. emotes[1])
+    else
+        ShroudConsoleLog("Emote refused (throttle or not grounded)")
+    end
+end
+
+ShroudSwitchDeck¶
+
+ShroudSwitchDeck(deck: number) -> boolean
+
+deck: number, the intended deck index. Ignored.
+
+Returns: boolean — always false.
+
+Notes: unimplemented stub. It performs no action and never switches decks; do not rely on it. Change decks through the game UI instead.
+
+-- Always returns false; kept only for API compatibility.
+if not ShroudSwitchDeck(1) then
+    ShroudConsoleLog("ShroudSwitchDeck is a stub and did nothing")
+end
+
+Scene and world¶
+
+These functions report the scene the local player is currently in, the in-game clock, the scene's caps and rules, and a world-to-screen projection. They read live client state, so they are only meaningful once you are actually in a scene. Only some of them tolerate not being in a scene yet: ShroudGetGameTime (zeroed table when the clock is unavailable), ShroudWorldToScreenPoint (zeroed vector when the camera is unavailable), and the two dungeon functions (empty string when the plot manager is unavailable) all guard against a not-ready manager. The five scene-name/orientation/max-player/PVP/POT functions do NOT: they dereference the scene stack and skybox manager directly, so calling them before you are in a scene (or before those managers exist) can throw rather than returning a fallback. Call them only once you know you are in a scene. The scene-name functions always return the true engine scene identity even inside a custom-named player dungeon or basement; the owner-set custom name is exposed only through the two dungeon functions.
+
+Function
+Call
+What it does
+
+ShroudGetCurrentSceneName
+ShroudGetCurrentSceneName()
+Display name of the current scene
+
+ShroudGetCurrentSceneNameRaw
+ShroudGetCurrentSceneNameRaw()
+Internal scene id string
+
+ShroudGetCurrentSceneOrientation
+ShroudGetCurrentSceneOrientation()
+Compass offset of the scene
+
+ShroudGetCurrentSceneMaxPlayerCount
+ShroudGetCurrentSceneMaxPlayerCount()
+Max players the scene allows
+
+ShroudGetCurrentSceneIsPVP
+ShroudGetCurrentSceneIsPVP()
+Whether the scene is PVP
+
+ShroudGetCurrentSceneIsPOT
+ShroudGetCurrentSceneIsPOT()
+Whether the scene is a Player-Owned Town
+
+ShroudGetGameTime
+ShroudGetGameTime()
+Current in-game date and time
+
+ShroudGetSceneCap
+ShroudGetSceneCap()
+Adventurer level and skill caps
+
+ShroudWorldToScreenPoint
+ShroudWorldToScreenPoint(x, y, z)
+Project a world point to screen space
+
+ShroudGetCurrentDungeonName
+ShroudGetCurrentDungeonName()
+Owner-set name of the player dungeon
+
+ShroudGetCurrentDungeonOwner
+ShroudGetCurrentDungeonOwner()
+Owner character name of the dungeon
+
+ShroudGetCurrentSceneName¶
+
+ShroudGetCurrentSceneName() -> string
+
+Returns: string, the human-readable display name of the scene at the top of the scene stack (for example Owl's Head). Never nil; an unresolved scene yields whatever the scene manager maps the id to.
+
+Notes: this always reflects the real scene identity, even inside a custom-named player dungeon or basement. Use it (or the raw form) to key logic off a scene rather than the owner-supplied name. Reads the scene stack directly, so only call it once you are in a scene.
+
+local scene = ShroudGetCurrentSceneName()
+ShroudConsoleLog("You are in: " .. scene)
+
+ShroudGetCurrentSceneNameRaw¶
+
+ShroudGetCurrentSceneNameRaw() -> string
+
+Returns: string, the internal scene id (for example PlayerDungeon_GreenBrickFoyer_3Connections), not the localized display name.
+
+Notes: Same as ShroudGetCurrentSceneName but returns the stable internal id string instead of the display name. Prefer this for saved-variable keys and scene comparisons, since it does not change with client language.
+
+if ShroudGetCurrentSceneNameRaw() == "OwlsHead_01" then
+    ShroudConsoleLog("Welcome back to Owl's Head")
+end
+
+ShroudGetCurrentSceneOrientation¶
+
+ShroudGetCurrentSceneOrientation() -> number
+
+Returns: number, the scene's compass offset in degrees (the skybox CompassOffset). Used to align a custom compass or minimap with the scene's north.
+
+local offset = ShroudGetCurrentSceneOrientation()
+local heading = (ShroudGetPlayerOrientation() + offset) % 360
+ShroudConsoleLog("Compass heading: " .. heading)
+
+ShroudGetCurrentSceneMaxPlayerCount¶
+
+ShroudGetCurrentSceneMaxPlayerCount() -> number
+
+Returns: number, the maximum number of players the current scene permits, as configured in scene data.
+
+local cap = ShroudGetCurrentSceneMaxPlayerCount()
+ShroudConsoleLog("This scene holds up to " .. cap .. " players")
+
+ShroudGetCurrentSceneIsPVP¶
+
+ShroudGetCurrentSceneIsPVP() -> boolean
+
+Returns: boolean, true if the current scene is flagged as a PVP scene, false otherwise.
+
+if ShroudGetCurrentSceneIsPVP() then
+    ShroudConsoleLog("PVP is active here - watch yourself")
+end
+
+ShroudGetCurrentSceneIsPOT¶
+
+ShroudGetCurrentSceneIsPOT() -> boolean
+
+Returns: boolean, true if the current scene is a Player-Owned Town, false otherwise.
+
+if ShroudGetCurrentSceneIsPOT() then
+    ShroudConsoleLog("You are in a Player-Owned Town")
+end
+
+ShroudGetGameTime¶
+
+ShroudGetGameTime() -> table
+
+Returns: table with the current in-game date and time. Fields: Hour (number, fractional hour of day), Day (number), Month (number), Year (number), PeriodOfDay (string, for example Morning), Season (string). When the game clock is not yet available every field is zeroed and PeriodOfDay/Season are empty strings.
+
+Notes: Day and Month are the engine values plus one, so they read as human 1-based calendar numbers (the engine stores them 0-based). Hour is not offset. A zeroed table (Year 0, empty strings) means the clock was unavailable, not literal midnight of year 0.
+
+local t = ShroudGetGameTime()
+ShroudConsoleLog(string.format("%s, %d/%d/%d hour %.1f (%s)",
+    t.Season, t.Month, t.Day, t.Year, t.Hour, t.PeriodOfDay))
+
+ShroudGetSceneCap¶
+
+ShroudGetSceneCap() -> table
+
+Returns: table with two number fields: Level (the adventurer level cap for the current scene) and Skill (the skill cap). Values come from the current scene's cap configuration.
+
+local cap = ShroudGetSceneCap()
+ShroudConsoleLog("Level cap " .. cap.Level .. ", skill cap " .. cap.Skill)
+
+ShroudWorldToScreenPoint¶
+
+ShroudWorldToScreenPoint(x: number, y: number, z: number) -> table
+
+x, y, z: number, a point in world coordinates to project.
+
+Returns: table with number fields x, y, z. x and y are the pixel position in screen space (origin at the bottom-left corner); z is the distance from the camera in world units. When the main camera is unavailable it returns {x = 0, y = 0, z = 0}.
+
+Notes: a negative z means the world point is behind the camera, in which case the returned x/y are not a valid on-screen position. Screen-space y runs bottom-up here, unlike widget layout, whose y origin is the top; convert if you position a widget from this result.
+
+local p = ShroudWorldToScreenPoint(100, 20, 250)
+if p.z > 0 then
+    ShroudConsoleLog("On screen at " .. math.floor(p.x) .. ", " .. math.floor(p.y))
+end
+
+ShroudGetCurrentDungeonName¶
+
+ShroudGetCurrentDungeonName() -> string
+
+Returns: string, the owner-set name of the player dungeon or basement you are currently inside. Returns "" when you are outside a player dungeon or basement, or when the owner has not named it.
+
+Notes: this is the only source of the custom name; the ShroudGetCurrentSceneName* functions keep returning the true scene identity.
+
+local name = ShroudGetCurrentDungeonName()
+if name ~= "" then
+    ShroudConsoleLog("Entering dungeon: " .. name)
+end
+
+ShroudGetCurrentDungeonOwner¶
+
+ShroudGetCurrentDungeonOwner() -> string
+
+Returns: string, the character name of the owner of the player dungeon or basement you are inside. Returns "" when you are not inside a player dungeon or basement.
+
+Notes: Same as ShroudGetCurrentDungeonName but returns the owner's character name instead of the custom area name. The owner name is present even when the area is unnamed, so it can be non-empty while the name is "".
+
+local owner = ShroudGetCurrentDungeonOwner()
+if owner ~= "" then
+    ShroudConsoleLog("This dungeon belongs to " .. owner)
+end
+
+Screen, input, and UI state¶
+
+These read live screen dimensions, window mode, HUD/character-sheet visibility, and raw keyboard state. They query the client on the calling frame, so poll them from ShroudOnUpdate rather than caching. All are read-only: the key functions report state but cannot inject input, and none of these change anything. Key names are Unity KeyCode enum member names (case-sensitive, e.g. "A", "Space", "Escape", "F1", "LeftShift", "Mouse0"); an unrecognized name logs to the addon console and returns false.
+
+Function
+Call
+What it does
+
+ShroudGetScreenX
+ShroudGetScreenX()
+Screen width in pixels.
+
+ShroudGetScreenY
+ShroudGetScreenY()
+Screen height in pixels.
+
+ShroudGetFullScreen
+ShroudGetFullScreen()
+Whether the client is fullscreen.
+
+ShroudIsUIActive
+ShroudIsUIActive()
+Whether the game HUD is shown.
+
+ShroudIsCharacterSheetActive
+ShroudIsCharacterSheetActive()
+Whether the character sheet is open.
+
+ShroudGetCharacterSheetPosition
+ShroudGetCharacterSheetPosition()
+Character sheet on-screen position.
+
+ShroudGetKeyDown
+ShroudGetKeyDown(keyName)
+Whether a key is currently held.
+
+ShroudGetOnKeyDown
+ShroudGetOnKeyDown(keyName)
+Whether a key was pressed this frame.
+
+ShroudGetOnKeyUp
+ShroudGetOnKeyUp(keyName)
+Whether a key was released this frame.
+
+ShroudGetScreenX¶
+
+ShroudGetScreenX() -> number
+
+Returns: number — the current screen (window) width in pixels (Screen.width).
+
+Notes: reflects the live window size, so re-read it after the player resizes the window rather than storing it once at start.
+
+function ShroudOnStart()
+    local w = ShroudGetScreenX()
+    local h = ShroudGetScreenY()
+    ShroudConsoleLog("Screen is " .. w .. "x" .. h)
+    -- anchor a panel 210px in from the right edge
+    myPanel = ShroudUIPanel(w - 210, 10, 200, 80, 0, 0, UI.Panel, -1)
+end
+
+ShroudGetScreenY¶
+
+ShroudGetScreenY() -> number
+
+Returns: number — the current screen (window) height in pixels (Screen.height).
+
+Notes: same as ShroudGetScreenX but the vertical dimension; re-read after a resize.
+
+local h = ShroudGetScreenY()
+ShroudConsoleLog("Screen height: " .. h)
+
+ShroudGetFullScreen¶
+
+ShroudGetFullScreen() -> boolean
+
+Returns: boolean — true if the client is running fullscreen, false if windowed (Screen.fullScreen).
+
+if ShroudGetFullScreen() then
+    ShroudConsoleLog("Running fullscreen")
+else
+    ShroudConsoleLog("Running windowed")
+end
+
+ShroudIsUIActive¶
+
+ShroudIsUIActive() -> boolean
+
+Returns: boolean — true when the game HUD is shown, false when it is hidden (PlayerUI.showHUD).
+
+Notes: use it to hide your own widgets in lockstep with the HUD (for example when the player toggles the interface off for a screenshot).
+
+function ShroudOnUpdate()
+    if ShroudIsUIActive() then
+        ShroudShowObject(myPanel, UI.Panel)
+    else
+        ShroudHideObject(myPanel, UI.Panel)
+    end
+end
+
+ShroudIsCharacterSheetActive¶
+
+ShroudIsCharacterSheetActive() -> boolean
+
+Returns: boolean — true when the local player's character sheet dialog is open and shown, false when it is closed or the dialog does not exist.
+
+if ShroudIsCharacterSheetActive() then
+    ShroudConsoleLog("Character sheet is open")
+end
+
+ShroudGetCharacterSheetPosition¶
+
+ShroudGetCharacterSheetPosition() -> number, number
+
+Returns: two numbers x, y — the character sheet's on-screen pixel position. Returns nil when the character sheet dialog does not exist (never opened).
+
+Notes: the values are pre-adjusted so you can pass them straight to widget positioning. x is measured from the left screen edge (computed as Screen.width + dialogLocalX - 44), and y is already negated to match the top-down coordinate space that ShroudSetPosition expects. Because it returns a tuple, capture both values in one call; guard against nil before using them.
+
+function ShroudOnUpdate()
+    if ShroudIsCharacterSheetActive() then
+        local x, y = ShroudGetCharacterSheetPosition()
+        if x ~= nil then
+            -- dock a companion panel next to the character sheet
+            ShroudSetPosition(myPanel, UI.Panel, x - 210, y)
+            ShroudShowObject(myPanel, UI.Panel)
+        end
+    else
+        ShroudHideObject(myPanel, UI.Panel)
+    end
+end
+
+ShroudGetKeyDown¶
+
+ShroudGetKeyDown(keyName: string) -> boolean
+
+keyName: string — a Unity KeyCode member name, case-sensitive (e.g. "A", "Space", "LeftControl", "F5", "Mouse1").
+
+Returns: boolean — true for every frame the key is held down (Input.GetKey). Returns false and logs Keyname invalid: <name> to the console if keyName is not a valid KeyCode.
+
+Notes: level-triggered — stays true for the whole hold. Use it for continuous actions; use ShroudGetOnKeyDown for a single edge.
+
+function ShroudOnUpdate()
+    if ShroudGetKeyDown("LeftShift") then
+        ShroudModifyText(statusLabel, "Sprinting")
+    else
+        ShroudModifyText(statusLabel, "Walking")
+    end
+end
+
+ShroudGetOnKeyDown¶
+
+ShroudGetOnKeyDown(keyName: string) -> boolean
+
+keyName: string — a Unity KeyCode member name, case-sensitive.
+
+Returns: boolean — true only on the single frame the key transitions to pressed (Input.GetKeyDown). Returns false and logs Keyname invalid: <name> for an unrecognized name.
+
+Notes: same as ShroudGetKeyDown but edge-triggered on press, so it fires exactly once per keystroke. Poll it from ShroudOnUpdate so you do not miss the one frame it is true.
+
+function ShroudOnUpdate()
+    if ShroudGetOnKeyDown("F8") then
+        panelVisible = not panelVisible
+        if panelVisible then
+            ShroudShowObject(myPanel, UI.Panel)
+        else
+            ShroudHideObject(myPanel, UI.Panel)
+        end
+    end
+end
+
+ShroudGetOnKeyUp¶
+
+ShroudGetOnKeyUp(keyName: string) -> boolean
+
+keyName: string — a Unity KeyCode member name, case-sensitive.
+
+Returns: boolean — true only on the single frame the key transitions to released (Input.GetKeyUp). Returns false and logs Keyname invalid: <name> for an unrecognized name.
+
+Notes: same as ShroudGetOnKeyDown but edge-triggered on release.
+
+function ShroudOnUpdate()
+    if ShroudGetOnKeyUp("Space") then
+        ShroudConsoleLog("Space released")
+    end
+end
+
+UI widgets: creating and positioning¶
+
+These functions build the six addon-owned widget kinds and lay them out on the Lua canvas. Every create call returns a 0-based integer id that indexes an internal per-kind list (freed slots are reused), or -1 on failure; a texture-backed widget fails when its texture id is unknown. All later operations take that id plus the widget's UI kind (UI.Panel, UI.Image, UI.Text, UI.Button, UI.Toggle, UI.Input) and return true/false for hit/miss — a wrong kind, negative id, or out-of-range id returns false rather than erroring (the exceptions are noted per function). Widgets anchor to the canvas top-left corner and the y coordinate is negated internally, so y grows downward and a round-trip through ShroudGetPosition gives back the value you passed to ShroudSetPosition.
+
+Function
+Call
+What it does
+
+ShroudUIPanel
+ShroudUIPanel(x, y, width, height, textureID, parentID, parentKind, depth)
+Create a draggable panel (optional texture)
+
+ShroudUIImage
+ShroudUIImage(x, y, width, height, textureID, parentID, parentKind, depth)
+Create a textured image widget
+
+ShroudUIText
+ShroudUIText(text, fontSize, x, y, width, height, parentID, parentKind, depth)
+Create a text label
+
+ShroudUIButton
+ShroudUIButton(x, y, width, height, textureID, parentID, parentKind, depth)
+Create a clickable button (needs a texture)
+
+ShroudUIInput
+ShroudUIInput(x, y, width, height, parentID, parentKind)
+Create a text input field
+
+ShroudUIToggle
+ShroudUIToggle(x, y, width, height, parentID, parentKind)
+Create a checkbox toggle
+
+ShroudSetPosition
+ShroudSetPosition(id, kind, x, y)
+Move a widget (y negated)
+
+ShroudGetPosition
+ShroudGetPosition(id, kind)
+Read a widget's position
+
+ShroudSetSize
+ShroudSetSize(id, kind, width, height)
+Resize a widget
+
+ShroudSetScale
+ShroudSetScale(id, kind, scale)
+Uniformly scale a widget
+
+ShroudSetPivot
+ShroudSetPivot(id, kind, x, y)
+Set the pivot point
+
+ShroudSetAnchorMin
+ShroudSetAnchorMin(id, kind, x, y)
+Set the min anchor
+
+ShroudSetAnchorMax
+ShroudSetAnchorMax(id, kind, x, y)
+Set the max anchor
+
+ShroudRotateObject
+ShroudRotateObject(id, kind, degrees)
+Set absolute Z rotation
+
+ShroudSetColor
+ShroudSetColor(id, kind, hexColor)
+Tint a widget (not Button)
+
+ShroudSetTransparency
+ShroudSetTransparency(id, kind, alpha)
+Set a widget's alpha
+
+ShroudModifyImage
+ShroudModifyImage(id, kind, textureID)
+Swap a widget's sprite (not Text)
+
+ShroudModifyText
+ShroudModifyText(id, text)
+Replace a text label's string
+
+ShroudSetTextAlignment
+ShroudSetTextAlignment(id, anchor)
+Align text within its rect
+
+ShroudSetFontSize
+ShroudSetFontSize(id, kind, size)
+Set text/input font size
+
+ShroudSetMask
+ShroudSetMask(id, kind)
+Clip children to an Image (or re-add a Panel's mask)
+
+ShroudUnsetMask
+ShroudUnsetMask(id, kind)
+Remove a mask
+
+ShroudUIPanel¶
+
+ShroudUIPanel(x: number, y: number, width: number, height: number, textureID: number, parentID: number, parentKind: UI, depth: number) -> number
+
+x, y: number, pixel offset of the top-left corner from the canvas top-left; y is negated internally so positive y is downward.
+
+width, height: number, size in pixels.
+
+textureID: number, a texture id from ShroudLoadTexture; pass -1 for an untextured (blank) panel. Optional, defaults -1.
+
+parentID: number, id of the parent widget, or -1 for the canvas. Optional, defaults -1.
+
+parentKind: UI, kind of the parent; a panel may parent under UI.Image, UI.Text, UI.Panel, or UI.Button (anything else falls back to the canvas). Optional, defaults UI.None.
+
+depth: number, accepted for signature compatibility but not applied. Optional, defaults -1.
+
+Returns: number, the new panel's 0-based id, or -1 if textureID was given (not -1) but no texture with that id exists.
+
+Notes: panels are draggable and receive mouse enter/exit callbacks by default. A panel is created with a Unity Mask component already attached, so it clips its children to its own rect without any ShroudSetMask call.
+
+local tex = ShroudLoadTexture("panel_bg.png")
+local panel = ShroudUIPanel(40, 60, 300, 200, tex)
+if panel == -1 then
+    ShroudConsoleLog("panel texture failed to load")
+else
+    ShroudConsoleLog("panel id = " .. panel)
+end
+
+ShroudUIImage¶
+
+ShroudUIImage(x: number, y: number, width: number, height: number, textureID: number, parentID: number, parentKind: UI, depth: number) -> number
+
+x, y: number, top-left offset from the canvas top-left; y negated internally.
+
+width, height: number, size in pixels.
+
+textureID: number, a texture id from ShroudLoadTexture. Required — there is no blank-image form.
+
+parentID: number, parent widget id, or -1 for the canvas. Optional, defaults -1.
+
+parentKind: UI, parent kind (UI.Image, UI.Text, UI.Panel, UI.Button, else canvas). Optional, defaults UI.None.
+
+depth: number, accepted but not applied. Optional, defaults -1.
+
+Returns: number, the new image's 0-based id, or -1 if the texture id is unknown.
+
+Notes: unlike a panel, an image is created without a Mask; add one with ShroudSetMask when you want it to clip its children.
+
+local tex = ShroudLoadTexture("icon.png")
+local img = ShroudUIImage(10, 10, 64, 64, tex)
+ShroudConsoleLog("image id = " .. img)
+
+ShroudUIText¶
+
+ShroudUIText(text: string, fontSize: number, x: number, y: number, width: number, height: number, parentID: number, parentKind: UI, depth: number) -> number
+
+text: string, the initial label string.
+
+fontSize: number, point size for the label.
+
+x, y: number, top-left offset from the canvas top-left; y negated internally.
+
+width, height: number, size of the text rect in pixels.
+
+parentID: number, parent widget id, or -1 for the canvas. Optional, defaults -1.
+
+parentKind: UI, parent kind (UI.Image, UI.Text, UI.Panel, UI.Button, else canvas). Optional, defaults UI.None.
+
+depth: number, accepted but not applied. Optional, defaults -1.
+
+Returns: number, the new label's 0-based id. This call has no texture dependency and does not return -1.
+
+local label = ShroudUIText("Hello, Avatar", 18, 20, 20, 200, 30)
+ShroudModifyText(label, "Gold: " .. ShroudPlayerGold)
+
+ShroudUIButton¶
+
+ShroudUIButton(x: number, y: number, width: number, height: number, textureID: number, parentID: number, parentKind: UI, depth: number) -> number
+
+x, y: number, top-left offset from the canvas top-left; y negated internally.
+
+width, height: number, size in pixels.
+
+textureID: number, the button face texture id. Although it defaults to -1, a button requires a valid texture — an unknown id makes the call fail.
+
+parentID: number, parent widget id, or -1 for the canvas. Optional, defaults -1.
+
+parentKind: UI, parent kind (UI.Image, UI.Text, UI.Panel, UI.Button, else canvas). Optional, defaults UI.None.
+
+depth: number, accepted but not applied. Optional, defaults -1.
+
+Returns: number, the new button's 0-based id, or -1 if the texture id is unknown.
+
+Notes: the button wires click and enter/exit listeners; handle clicks through ShroudSetClickListener and the ShroudOnMouseClick callback.
+
+local face = ShroudLoadTexture("button.png")
+local btn = ShroudUIButton(50, 100, 120, 32, face)
+if btn ~= -1 then ShroudSetClickListener(btn, UI.Button) end
+
+ShroudUIInput¶
+
+ShroudUIInput(x: number, y: number, width: number, height: number, parentID: number, parentKind: UI) -> number
+
+x, y: number, top-left offset from the canvas top-left; y negated internally.
+
+width, height: number, size in pixels. Optional, both default 20.
+
+parentID: number, parent widget id, or -1 for the canvas. Optional, defaults -1.
+
+parentKind: UI, parent kind — an input may parent only under UI.Image or UI.Panel (anything else falls back to the canvas). Optional, defaults UI.None.
+
+Returns: number, the new input's 0-based id. No texture dependency; does not return -1.
+
+Notes: starts with an italic "Enter text..." placeholder; read the field with ShroudGetInputText and set it with ShroudSetInputText.
+
+local box = ShroudUIInput(20, 200, 180, 24)
+ShroudSetPlaceholderText(box, "search...")
+ShroudConsoleLog("typed: " .. (ShroudGetInputText(box) or ""))
+
+ShroudUIToggle¶
+
+ShroudUIToggle(x: number, y: number, width: number, height: number, parentID: number, parentKind: UI) -> number
+
+x, y: number, top-left offset from the canvas top-left; y negated internally.
+
+width, height: number, size in pixels. Optional, both default 20.
+
+parentID: number, parent widget id, or -1 for the canvas. Optional, defaults -1.
+
+parentKind: UI, parent kind — a toggle may parent only under UI.Image or UI.Panel (anything else falls back to the canvas). Optional, defaults UI.None.
+
+Returns: number, the new toggle's 0-based id. No texture dependency; does not return -1.
+
+Notes: read/write the checked state with ShroudGetToggle/ShroudSetToggle; state changes fire the ShroudOnToggleChange callback.
+
+local chk = ShroudUIToggle(20, 240, 20, 20)
+ShroudSetToggle(chk, true)
+
+ShroudSetPosition¶
+
+ShroudSetPosition(id: number, kind: UI, x: number, y: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Accepts UI.Image, UI.Text, UI.Panel, UI.Button, UI.Toggle, UI.Input.
+
+x, y: number, new top-left offset from the canvas top-left. Optional, both default 0. y is negated internally, so positive y moves the widget down.
+
+Returns: boolean, true on success; false if kind is UI.None, id is negative, or id is out of range for that kind.
+
+ShroudSetPosition(panel, UI.Panel, 100, 150)
+
+ShroudGetPosition¶
+
+ShroudGetPosition(id: number, kind: UI) -> LuaVector2
+
+id: number, the widget id.
+
+kind: UI, its kind. Accepts UI.Image, UI.Text, UI.Panel, UI.Button, UI.Toggle, UI.Input.
+
+Returns: a LuaVector2 userdata object with numeric fields x and y (accessed as pos.x / pos.y), or nil if kind is UI.None, id is negative, or id is out of range. This is a registered userdata, not a Lua table, so type(pos) is "userdata". The returned y is un-negated, so it matches the value you gave ShroudSetPosition.
+
+local pos = ShroudGetPosition(panel, UI.Panel)
+if pos then
+    ShroudConsoleLog("panel at " .. pos.x .. ", " .. pos.y)
+end
+
+ShroudSetSize¶
+
+ShroudSetSize(id: number, kind: UI, width: number, height: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image, UI.Text, UI.Panel, UI.Button only — UI.Toggle and UI.Input are not handled and return false.
+
+width, height: number, the new size in pixels. Optional, both default 0.
+
+Returns: boolean, true on success; false for an unsupported kind, UI.None, a negative id, or an out-of-range id.
+
+ShroudSetSize(panel, UI.Panel, 320, 240)
+
+ShroudSetScale¶
+
+ShroudSetScale(id: number, kind: UI, scale: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image, UI.Text, UI.Panel, UI.Button.
+
+scale: number, a single uniform factor applied to both the x and y local scale. Optional, defaults 1.
+
+Returns: boolean, true on success; false for an unsupported kind, UI.None, a negative id, or an out-of-range id.
+
+ShroudSetScale(img, UI.Image, 1.5)
+
+ShroudSetPivot¶
+
+ShroudSetPivot(id: number, kind: UI, x: number, y: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image, UI.Text, UI.Panel, UI.Button.
+
+x, y: number, the pivot in 0..1 rect space (0,0 is bottom-left, 1,1 top-right). Optional, both default 0.
+
+Returns: boolean, true on success; false for an unsupported kind, UI.None, a negative id, or an out-of-range id.
+
+Notes: as a side effect this also multiplies the widget's current anchored position by the new pivot x and y, so setting the pivot generally shifts the widget — set the pivot before positioning, then call ShroudSetPosition.
+
+ShroudSetPivot(img, UI.Image, 0.5, 0.5)
+ShroudSetPosition(img, UI.Image, 100, 100)
+
+ShroudSetAnchorMin¶
+
+ShroudSetAnchorMin(id: number, kind: UI, x: number, y: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image, UI.Text, UI.Panel, UI.Button.
+
+x, y: number, the minimum anchor in 0..1 of the parent rect. Optional, both default 0.
+
+Returns: boolean, true on success; false for an unsupported kind, UI.None, a negative id, or an out-of-range id.
+
+ShroudSetAnchorMin(panel, UI.Panel, 0, 0)
+ShroudSetAnchorMax(panel, UI.Panel, 1, 1)
+
+ShroudSetAnchorMax¶
+
+ShroudSetAnchorMax(id: number, kind: UI, x: number, y: number) -> boolean
+Same as ShroudSetAnchorMin but sets the maximum anchor corner. Applies to UI.Image, UI.Text, UI.Panel, UI.Button; x, y default 0; returns false for an unsupported kind, UI.None, a negative id, or an out-of-range id.
+
+ShroudRotateObject¶
+
+ShroudRotateObject(id: number, kind: UI, degrees: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image, UI.Text, UI.Panel, UI.Button.
+
+degrees: number, the absolute Z rotation in degrees. Optional, defaults 0. This sets, not accumulates — the value replaces the current rotation.
+
+Returns: boolean, true on success; false for an unsupported kind, UI.None, a negative id, or an out-of-range id.
+
+ShroudRotateObject(img, UI.Image, 45)
+
+ShroudSetColor¶
+
+ShroudSetColor(id: number, kind: UI, hexColor: string) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image, UI.Text, UI.Panel, UI.Toggle, UI.Input. UI.Button is rejected — tint a button with ShroudSetButtonColor.
+
+hexColor: string, an HTML color string. Always include the leading # ("#RRGGBB" or "#RRGGBBAA"). The parse happens before any # fix-up, so a string without a leading # does not parse — it yields transparent black rather than being auto-corrected.
+
+Returns: boolean, true on success; false if kind is UI.None or UI.Button, id is negative, or id is out of range.
+
+Notes: an unparseable hex string does not fail the call — it resolves to transparent black and still returns true, so validate your color strings (and keep the #).
+
+ShroudSetColor(panel, UI.Panel, "#204060")
+ShroudSetColor(label, UI.Text, "#FFCC00")
+
+ShroudSetTransparency¶
+
+ShroudSetTransparency(id: number, kind: UI, alpha: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image, UI.Button, UI.Panel, UI.Text, UI.Toggle, UI.Input.
+
+alpha: number, the alpha channel, 0 fully transparent to 1 fully opaque.
+
+Returns: boolean, true on success; false if kind is UI.None, id is negative, or id is out of range.
+
+ShroudSetTransparency(panel, UI.Panel, 0.75)
+
+ShroudModifyImage¶
+
+ShroudModifyImage(id: number, kind: UI, textureID: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image, UI.Panel, UI.Button, UI.Input. UI.Text is rejected.
+
+textureID: number, the new texture id from ShroudLoadTexture.
+
+Returns: boolean, true on success; false if kind is UI.Text, id is negative, the texture id is unknown, or id is out of range for that kind.
+
+local hover = ShroudLoadTexture("panel_hover.png")
+ShroudModifyImage(panel, UI.Panel, hover)
+
+ShroudModifyText¶
+
+ShroudModifyText(id: number, text: string) -> boolean
+
+id: number, a text-widget id (from ShroudUIText). There is no kind parameter — this always targets a text label.
+
+text: string, the replacement string. Optional, defaults "".
+
+Returns: boolean, true on success; false if id is negative or out of range for the text list.
+
+ShroudModifyText(label, "HP: " .. ShroudPlayerCurrentHealth)
+
+ShroudSetTextAlignment¶
+
+ShroudSetTextAlignment(id: number, anchor: TextAnchor) -> boolean
+
+id: number, a text-widget id (from ShroudUIText). No kind parameter.
+
+anchor: TextAnchor, one of UpperLeft, UpperCenter, UpperRight, MiddleLeft, MiddleCenter, MiddleRight, LowerLeft, LowerCenter, LowerRight. Optional, defaults UpperLeft.
+
+Returns: boolean, true on success; false only when id is negative.
+
+Notes: this guards against a negative id but does not bounds-check the upper end — passing an id at or beyond the text-widget count throws. Only pass ids returned by ShroudUIText.
+
+ShroudSetTextAlignment(label, TextAnchor.MiddleCenter)
+
+ShroudSetFontSize¶
+
+ShroudSetFontSize(id: number, kind: UI, size: number) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Text and UI.Input only; for an input it sizes both the text and the placeholder.
+
+size: number, the new font point size.
+
+Returns: boolean, true on success; false for any other kind, a negative id, or an out-of-range id.
+
+ShroudSetFontSize(label, UI.Text, 24)
+
+ShroudSetMask¶
+
+ShroudSetMask(id: number, kind: UI) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image and UI.Panel only.
+
+Returns: boolean, true if a Mask was added; false if the kind is unsupported, id is negative or out of range, or the widget already has a Mask.
+
+Notes: adds a Unity Mask component so child widgets are clipped to this widget's rect. Use it to build scroll regions or clipped panels. A panel already ships with a Mask, so ShroudSetMask(panel, UI.Panel) returns false and changes nothing — panels clip their children out of the box. This call is meant for an image, which is created without a Mask; it only re-adds a Mask to a panel after one was removed with ShroudUnsetMask.
+
+-- An image has no Mask by default, so this adds one and returns true:
+ShroudSetMask(img, UI.Image)
+
+ShroudUnsetMask¶
+
+ShroudUnsetMask(id: number, kind: UI) -> boolean
+
+id: number, the widget id.
+
+kind: UI, its kind. Applies to UI.Image and UI.Panel only.
+
+Returns: boolean, true if a Mask was removed; false if the kind is unsupported, id is negative or out of range, or the widget has no Mask to remove.
+
+Notes: because a panel is created with a Mask, ShroudUnsetMask(panel, UI.Panel) succeeds and stops the panel from clipping its children.
+
+-- Remove a panel's default Mask so its children can overflow its rect:
+ShroudUnsetMask(panel, UI.Panel)
+
+UI widgets: parenting, visibility, and behavior¶
+
+These functions restructure and control retained-mode widgets created by the ShroudUI* family (see the widget-creation section). Every widget is addressed by the 0-based id its create call returned plus its UI kind (UI.Panel, UI.Image, UI.Text, UI.Button, UI.Toggle, UI.Input; UI.None is the invalid/unset value). All of them fail soft: an out-of-range id, UI.None, or an unsupported kind returns the failure value rather than throwing. Two frozen quirks run through this group: the parenting setters (ShroudSetParent and the four typed variants) return -1 even when they succeed, and the Dragguable spelling is permanent. Like the rest of the retained-widget API these are only valid once widgets exist, so call them from a callback (ShroudOnStart, ShroudOnUpdate, and so on), not at file scope.
+
+Function
+Call
+What it does
+
+ShroudSetParent
+ShroudSetParent(id, kind, parentId, parentKind)
+Reparent any widget under any widget
+
+ShroudSetPanelParent
+ShroudSetPanelParent(panelId, parentId, parentKind)
+Reparent a panel; -1 detaches to canvas
+
+ShroudSetImageParent
+ShroudSetImageParent(imageId, parentId, parentKind)
+Reparent an image; -1 detaches to canvas
+
+ShroudSetTextParent
+ShroudSetTextParent(textId, parentId, parentKind)
+Reparent a text; -1 detaches to canvas
+
+ShroudSetButtonParent
+ShroudSetButtonParent(buttonId, parentId, parentKind)
+Reparent a button; -1 detaches to canvas
+
+ShroudGetParentID
+ShroudGetParentID(id, kind)
+Id of the widget's parent widget
+
+ShroudGetParentObjectKind
+ShroudGetParentObjectKind(id, kind)
+UI kind of the widget's parent
+
+ShroudSetDragguable
+ShroudSetDragguable(id, kind)
+Make a panel/image draggable
+
+ShroudUnsetDragguable
+ShroudUnsetDragguable(id, kind)
+Remove draggability
+
+ShroudSetResizable
+ShroudSetResizable(id, kind, direction)
+Let a draggable panel be resized
+
+ShroudMinMaxSize
+ShroudMinMaxSize(id, kind, min, max, direction)
+Clamp resize range of a draggable panel/image
+
+ShroudSetInOutListener
+ShroudSetInOutListener(id, kind)
+Fire mouse over/out callbacks for a widget
+
+ShroudUnsetInOutListener
+ShroudUnsetInOutListener(id, kind)
+Remove the over/out listener
+
+ShroudSetClickListener
+ShroudSetClickListener(id, kind)
+Fire the mouse-click callback for a widget
+
+ShroudUnsetClickListener
+ShroudUnsetClickListener(id, kind)
+Remove the click listener
+
+ShroudRaycastObject
+ShroudRaycastObject(id, kind, enable)
+Toggle whether a widget catches the pointer
+
+ShroudHideObject
+ShroudHideObject(id, kind)
+Deactivate one widget
+
+ShroudShowObject
+ShroudShowObject(id, kind)
+Reactivate one widget
+
+ShroudHideLuaUI
+ShroudHideLuaUI()
+Hide the whole addon canvas
+
+ShroudShowLuaUI
+ShroudShowLuaUI()
+Show the whole addon canvas
+
+ShroudDestroyObject
+ShroudDestroyObject(id, kind)
+Destroy a widget and free its slot
+
+ShroudSetParent¶
+
+ShroudSetParent(id: number, kind: UI, parentId: number, parentKind: UI) -> number
+
+id: number, 0-based id of the child widget.
+
+kind: UI, the child widget's kind. Any of the six kinds may be a child.
+
+parentId: number, 0-based id of the parent widget.
+
+parentKind: UI, the parent widget's kind. Only UI.Image, UI.Text, UI.Panel, and UI.Button are valid parents; a UI.Toggle or UI.Input child rejects UI.Button/UI.Text parents.
+
+Returns: number. Always -1, even on success (frozen quirk) — do not treat the return as an error code. id < 0 or parentId < 0 returns -1 with no change.
+
+Notes: reparents keeping local layout (world-position-stays is false), so the child's size and anchored position are preserved relative to the new parent. Reparenting a panel under a panel removes the child's bring-to-front behavior.
+
+function ShroudOnStart()
+    parent = ShroudUIPanel(100, 100, 200, 200)
+    child  = ShroudUIText("nested", 24, 10, 10, 120, 30)
+    ShroudSetParent(child, UI.Text, parent, UI.Panel)
+    -- return is always -1; confirm with GetParentID instead
+    ShroudConsoleLog("child parent id = " .. ShroudGetParentID(child, UI.Text))
+end
+
+ShroudSetPanelParent¶
+
+ShroudSetPanelParent(panelId: number, parentId: number, parentKind: UI) -> number
+Reparent a panel, with the child kind fixed to UI.Panel.
+
+panelId: number, 0-based id of the panel to reparent.
+
+parentId: number, 0-based id of the parent widget, or -1 to detach to the top-level addon canvas.
+
+parentKind: UI, the parent widget's kind (UI.Image/UI.Text/UI.Panel/UI.Button).
+
+Returns: number. Always -1 (frozen quirk).
+
+Notes: parentId = -1 reparents the panel to the root canvas and restores its bring-to-front component, which is the way to promote a nested panel back to a free-floating window.
+
+function ShroudOnStart()
+    win = ShroudUIPanel(200, 200, 300, 200)
+    ShroudSetPanelParent(win, -1, UI.Panel)   -- float at canvas top level
+    ShroudSetDragguable(win, UI.Panel)
+end
+
+ShroudSetImageParent¶
+
+ShroudSetImageParent(imageId: number, parentId: number, parentKind: UI) -> number
+Reparent an image, with the child kind fixed to UI.Image. Same as ShroudSetPanelParent but for an image widget; parentId = -1 detaches to the canvas. Returns -1 even on success.
+
+icon = ShroudSetImageParent(icon, panel, UI.Panel)  -- ignore the return; it is -1
+
+ShroudSetTextParent¶
+
+ShroudSetTextParent(textId: number, parentId: number, parentKind: UI) -> number
+Reparent a text widget, with the child kind fixed to UI.Text. Same as ShroudSetPanelParent but for a text widget; parentId = -1 detaches to the canvas. Returns -1 even on success.
+
+ShroudSetTextParent(label, panel, UI.Panel)
+
+ShroudSetButtonParent¶
+
+ShroudSetButtonParent(buttonId: number, parentId: number, parentKind: UI) -> number
+Reparent a button, with the child kind fixed to UI.Button. Same as ShroudSetPanelParent but for a button widget; parentId = -1 detaches to the canvas. Returns -1 even on success.
+
+ShroudSetButtonParent(okButton, panel, UI.Panel)
+
+ShroudGetParentID¶
+
+ShroudGetParentID(id: number, kind: UI) -> number
+
+id: number, 0-based id of the widget whose parent you want.
+
+kind: UI, the widget's own kind.
+
+Returns: number. The 0-based id of the parent widget, or -1 when the widget is invalid, kind is UI.None, or its parent is the root canvas rather than another addon widget.
+
+Notes: the returned id is only meaningful together with ShroudGetParentObjectKind — the id indexes whichever widget list the parent belongs to, so read both to identify the parent unambiguously.
+
+pid = ShroudGetParentID(child, UI.Text)
+if pid >= 0 then
+    ShroudConsoleLog("parent id " .. pid .. " kind " .. ShroudGetParentObjectKind(child, UI.Text))
+end
+
+ShroudGetParentObjectKind¶
+
+ShroudGetParentObjectKind(id: number, kind: UI) -> UI
+
+id: number, 0-based id of the widget.
+
+kind: UI, the widget's own kind.
+
+Returns: UI. The parent widget's kind, or UI.None when the widget is invalid, kind is UI.None, or the parent is the root canvas.
+
+Notes: pair with ShroudGetParentID to fully resolve the parent.
+
+kind = ShroudGetParentObjectKind(child, UI.Text)
+if kind == UI.Panel then ShroudConsoleLog("child sits inside a panel") end
+
+ShroudSetDragguable¶
+
+ShroudSetDragguable(id: number, kind: UI) -> boolean
+
+id: number, 0-based id of the widget.
+
+kind: UI, must be UI.Panel or UI.Image; other kinds are ignored.
+
+Returns: boolean. true when drag support was added, false for an unsupported kind, an invalid id, or a widget that is already draggable.
+
+Notes: the spelling Dragguable is frozen; do not correct it. Adds pointer-drag and bring-to-front behavior. Required before ShroudSetResizable or ShroudMinMaxSize will take effect.
+
+function ShroudOnStart()
+    win = ShroudUIPanel(300, 300, 260, 180)
+    if ShroudSetDragguable(win, UI.Panel) then
+        ShroudConsoleLog("panel is now draggable")
+    end
+end
+
+ShroudUnsetDragguable¶
+
+ShroudUnsetDragguable(id: number, kind: UI) -> boolean
+Remove drag/bring-to-front support. Same as ShroudSetDragguable but in reverse: kind must be UI.Panel or UI.Image. Returns true when a drag component was present and removed, false when the widget was not draggable or the kind is unsupported.
+
+ShroudUnsetDragguable(win, UI.Panel)
+
+ShroudSetResizable¶
+
+ShroudSetResizable(id: number, kind: UI, direction: string) -> boolean
+
+id: number, 0-based id of the panel.
+
+kind: UI, only UI.Panel is supported.
+
+direction: string, case-insensitive: "horizontal", "vertical", "corner" (both axes), or "none" (disables resizing).
+
+Returns: boolean. true when applied, false for a non-panel, an invalid id, or a panel that is not already draggable.
+
+Notes: the panel must first be made draggable with ShroudSetDragguable; without the drag component this is a no-op that returns false.
+
+ShroudSetDragguable(win, UI.Panel)
+ShroudSetResizable(win, UI.Panel, "corner")
+
+ShroudMinMaxSize¶
+
+ShroudMinMaxSize(id: number, kind: UI, min: number, max: number, direction: string) -> boolean
+
+id: number, 0-based id of the widget.
+
+kind: UI, only UI.Panel or UI.Image are supported.
+
+min: number, minimum size in pixels for the chosen axis/axes.
+
+max: number, maximum size in pixels.
+
+direction: string, case-insensitive: "horizontal", "vertical", "corner" (both axes), or "none" (resets the clamp to 20–1000 on both axes).
+
+Returns: boolean. true when applied, false for an unsupported kind, an invalid id, or a widget that is not already draggable.
+
+Notes: like ShroudSetResizable, the widget must already be draggable (ShroudSetDragguable) for the clamp to attach.
+
+ShroudSetDragguable(win, UI.Panel)
+ShroudSetResizable(win, UI.Panel, "corner")
+ShroudMinMaxSize(win, UI.Panel, 120, 600, "corner")
+
+ShroudSetInOutListener¶
+
+ShroudSetInOutListener(id: number, kind: UI) -> boolean
+
+id: number, 0-based id of the widget.
+
+kind: UI, supported for UI.Image, UI.Panel, UI.Text, and UI.Button.
+
+Returns: boolean. true when the listener was added, false for an unsupported kind (UI.Toggle/UI.Input), an invalid id, or a widget that already has one.
+
+Notes: while the listener is attached, moving the pointer onto the widget invokes your ShroudOnMouseOver(id, kind) callback and moving off invokes ShroudOnMouseOut(id, kind).
+
+function ShroudOnStart()
+    box = ShroudUIPanel(100, 100, 150, 80)
+    ShroudSetInOutListener(box, UI.Panel)
+end
+function ShroudOnMouseOver(id, kind)
+    ShroudConsoleLog("hovering widget " .. id)
+end
+
+ShroudUnsetInOutListener¶
+
+ShroudUnsetInOutListener(id: number, kind: UI) -> boolean
+Remove the over/out listener. Same kinds as ShroudSetInOutListener (UI.Image/UI.Panel/UI.Text/UI.Button).
+
+Returns: boolean. false for UI.None/invalid id.
+
+Notes: frozen quirk — the removal branch tests for the drag component, not the listener, so it only strips the listener from widgets that are not also draggable and returns false on a draggable widget. To be certain a widget stops firing over/out, destroy and recreate it rather than relying on this call for a draggable one.
+
+ShroudUnsetInOutListener(box, UI.Panel)
+
+ShroudSetClickListener¶
+
+ShroudSetClickListener(id: number, kind: UI) -> boolean
+
+id: number, 0-based id of the widget.
+
+kind: UI, supported for UI.Image, UI.Panel, UI.Text, and UI.Button.
+
+Returns: boolean. true when the listener was added, false for an unsupported kind (UI.Toggle/UI.Input), an invalid id, or a widget that already has one.
+
+Notes: while attached, releasing the pointer over the widget invokes your ShroudOnMouseClick(id, kind) callback. Useful for making a plain image or panel act like a button.
+
+function ShroudOnStart()
+    tile = ShroudUIImage(100, 100, 64, 64, ShroudLoadTexture("tile.png"))
+    ShroudSetClickListener(tile, UI.Image)
+end
+function ShroudOnMouseClick(id, kind)
+    ShroudConsoleLog("clicked widget " .. id)
+end
+
+ShroudUnsetClickListener¶
+
+ShroudUnsetClickListener(id: number, kind: UI) -> boolean
+Remove the click listener. Accepts only UI.Image and UI.Panel (UI.Text and UI.Button are rejected up front and return false).
+
+Returns: boolean. false for UI.None, an invalid id, or a UI.Text/UI.Button kind.
+
+Notes: frozen quirk — the removal branch is inverted (it destroys only when no listener is present), so it does not actually strip a live click listener. To reliably stop click handling, destroy the widget with ShroudDestroyObject and recreate it.
+
+ShroudUnsetClickListener(tile, UI.Image)
+
+ShroudRaycastObject¶
+
+ShroudRaycastObject(id: number, kind: UI, enable: boolean) -> boolean
+
+id: number, 0-based id of the widget.
+
+kind: UI, any of the six widget kinds.
+
+enable: boolean, true to make the widget catch the pointer, false to let clicks and hovers pass through to whatever is behind it.
+
+Returns: boolean. true when applied, false for UI.None or an out-of-range id.
+
+Notes: toggles the underlying graphic's raycast target. Disable it on a decorative overlay so it does not block the widgets beneath it.
+
+overlay = ShroudUIImage(0, 0, 400, 400, ShroudLoadTexture("overlay.png"))
+ShroudRaycastObject(overlay, UI.Image, false)  -- clicks fall through
+
+ShroudHideObject¶
+
+ShroudHideObject(id: number, kind: UI) -> boolean
+
+id: number, 0-based id of the widget.
+
+kind: UI, supported only for UI.Image, UI.Text, UI.Panel, and UI.Button. A UI.Toggle or UI.Input widget is not handled and cannot be hidden with this call — it returns false and does nothing.
+
+Returns: boolean. true when the widget was deactivated, false for UI.None, an out-of-range id, or an unsupported kind (UI.Toggle/UI.Input).
+
+Notes: deactivates the widget's GameObject; its children hide with it, and its id and state are retained for a later ShroudShowObject. To hide a toggle or input, parent it under a panel and hide the panel instead.
+
+if ShroudGetToggle(myToggle) == false then
+    ShroudHideObject(panel, UI.Panel)
+end
+
+ShroudShowObject¶
+
+ShroudShowObject(id: number, kind: UI) -> boolean
+Reactivate a widget previously hidden with ShroudHideObject. Same as ShroudHideObject but sets the widget active again; supported only for UI.Image, UI.Text, UI.Panel, and UI.Button. A UI.Toggle or UI.Input widget cannot be reactivated with this call — it returns false and does nothing. Returns false for UI.None, an invalid id, or an unsupported kind.
+
+ShroudShowObject(panel, UI.Panel)
+
+ShroudHideLuaUI¶
+
+ShroudHideLuaUI() -> boolean
+
+Returns: boolean. true when the addon canvas was hidden, false if no canvas exists yet.
+
+Notes: deactivates the entire addon canvas at once, hiding every widget your addon created without destroying them. Pair with ShroudShowLuaUI. Use it for a global show/hide hotkey.
+
+function ShroudOnUpdate()
+    if ShroudGetOnKeyDown("f8") then
+        ShroudHideLuaUI()
+    end
+end
+
+ShroudShowLuaUI¶
+
+ShroudShowLuaUI() -> boolean
+Reactivate the whole addon canvas. Same as ShroudHideLuaUI but reveals every widget again; returns true when the canvas exists, false otherwise.
+
+ShroudShowLuaUI()
+
+ShroudDestroyObject¶
+
+ShroudDestroyObject(id: number, kind: UI) -> boolean
+
+id: number, 0-based id of the widget to destroy.
+
+kind: UI, any of the six widget kinds.
+
+Returns: boolean. true when the widget was destroyed, false for UI.None or an out-of-range id.
+
+Notes: destroys the GameObject and nulls its slot in the widget list. The id is not renumbered — the freed slot is reused by the next widget you create of that kind, so a create call after a destroy can hand back the same id. Do not keep using an id after destroying it.
+
+ShroudDestroyObject(panel, UI.Panel)
+panel = nil
+
+UI widgets: buttons, inputs, and toggles¶
+
+These functions style and read the interactive widgets created by ShroudUIButton, ShroudUIInput, and ShroudUIToggle. Every call takes the 0-based integer id that the matching create call returned. The input and button-color/button-image functions guard the id with an explicit >= 0 check, so an out-of-range or negative id there just fails the call (returns false, or nil for the getters). The toggle functions and ShroudSetButtonTransition do NOT: they only check the id against the upper bound, so a negative id indexes the backing list with a negative index and throws (surfacing as a Lua error). Pass ids you actually got back from a create call. The ButtonMode, Transition, and ContentType enums are exposed as Lua globals, so pass members like ButtonMode.Normal, Transition.ColorTint, or ContentType.Password. Colors are Unity HTML hex strings and must include the leading #.
+
+Function
+Call
+What it does
+
+ShroudSetButtonColor
+ShroudSetButtonColor(id, mode, hexColor)
+Sets one state color of a button
+
+ShroudSetButtonImage
+ShroudSetButtonImage(id, mode, textureID)
+Sets one state sprite of a button
+
+ShroudSetButtonTransition
+ShroudSetButtonTransition(id, transition)
+Chooses how a button shows state
+
+ShroudGetInputText
+ShroudGetInputText(id)
+Reads an input field's full text
+
+ShroudSetInputText
+ShroudSetInputText(id, text)
+Sets an input field's text
+
+ShroudSetInputContentType
+ShroudSetInputContentType(id, type)
+Sets input validation/keyboard type
+
+ShroudSetPlaceholderText
+ShroudSetPlaceholderText(id, text)
+Sets an input's empty-state hint text
+
+ShroudSetInputBackgroundColor
+ShroudSetInputBackgroundColor(id, hexColor)
+Tints an input field's background
+
+ShroudSetInputCharacterLimit
+ShroudSetInputCharacterLimit(id, limit)
+Caps how many characters fit
+
+ShroudSetInputReadonly
+ShroudSetInputReadonly(id, isOn)
+Locks an input against typing
+
+ShroudGetToggle
+ShroudGetToggle(id)
+Reads a toggle's checked state
+
+ShroudSetToggle
+ShroudSetToggle(id, enabled)
+Sets a toggle's checked state
+
+ShroudSetToggleReadonly
+ShroudSetToggleReadonly(id, enabled)
+Sets whether a toggle is interactable
+
+ShroudSetButtonColor¶
+
+ShroudSetButtonColor(id: number, mode: ButtonMode, hexColor: string) -> boolean
+
+id: number. The 0-based button id from ShroudUIButton.
+
+mode: ButtonMode. Which state to color. Valid: ButtonMode.Normal, ButtonMode.Highlighted, ButtonMode.Pressed, ButtonMode.Disabled. ButtonMode.None is rejected.
+
+hexColor: string. Unity HTML hex color, include the leading # (for example #3366CCFF).
+
+Returns: boolean. false if mode is ButtonMode.None, or id is negative or out of range; otherwise true.
+
+Notes: there is no parse-failure return. The hex string is parsed with ColorUtility.TryParseHtmlString, but its success flag is ignored, so an unparseable string (or a bare hex value missing the leading #) does not fail the call. Instead the color is left at the default fully-transparent black (0,0,0,0), which is still applied and the call still returns true (for a valid id). Always pass a valid #-prefixed hex string and check it yourself. Each call also assigns a brand-new color block that carries only the one state you set, so the other three state colors (and the fade duration and color multiplier) reset to zero. Set every state you care about in the same pass, and expect the colors to show only when the button's transition is Transition.ColorTint.
+
+local btn = ShroudUIButton(0, 0, 120, 30, 0, 0, UI.None, -1)
+ShroudSetButtonTransition(btn, Transition.ColorTint)
+ShroudSetButtonColor(btn, ButtonMode.Normal, "#2E7D32FF")
+ShroudSetButtonColor(btn, ButtonMode.Highlighted, "#43A047FF")
+ShroudSetButtonColor(btn, ButtonMode.Pressed, "#1B5E20FF")
+ShroudSetButtonColor(btn, ButtonMode.Disabled, "#555555FF")
+
+ShroudSetButtonImage¶
+
+ShroudSetButtonImage(id: number, mode: ButtonMode, textureID: number) -> boolean
+
+id: number. The 0-based button id from ShroudUIButton.
+
+mode: ButtonMode. Which state's sprite to set. Valid: ButtonMode.Normal, ButtonMode.Highlighted, ButtonMode.Pressed, ButtonMode.Disabled. ButtonMode.None is rejected.
+
+textureID: number. A texture id previously returned by ShroudLoadTexture; must be 0 or greater and currently loaded.
+
+Returns: boolean. false if mode is ButtonMode.None, id or textureID is negative, or the texture id is not loaded; otherwise true.
+
+Notes: ButtonMode.Normal replaces the button's base Image sprite directly. Highlighted, Pressed, and Disabled go into the button's sprite state and only appear when the transition is Transition.SpriteSwap.
+
+local tex = ShroudLoadTexture("button_idle.png")
+local btn = ShroudUIButton(0, 40, 120, 30, 0, 0, UI.None, -1)
+ShroudSetButtonTransition(btn, Transition.SpriteSwap)
+if ShroudSetButtonImage(btn, ButtonMode.Normal, tex) then
+    ShroudConsoleLog("button sprite set")
+end
+
+ShroudSetButtonTransition¶
+
+ShroudSetButtonTransition(id: number, transition: Transition) -> boolean
+
+id: number. The 0-based button id from ShroudUIButton.
+
+transition: Transition. How the button reflects its state. Valid: Transition.None, Transition.ColorTint, Transition.SpriteSwap.
+
+Returns: boolean. Returns true whenever the id is in range, and also falls through to true when transition is not one of the three valid values, so the return value is not a reliable success check.
+
+Notes: the id is only bounds-checked against the upper end (id < count) with no >= 0 guard, so a negative id indexes the button list with a negative index and throws (a Lua error), not a false return. Pass an id you got back from ShroudUIButton. Pick Transition.ColorTint before setting state colors with ShroudSetButtonColor, or Transition.SpriteSwap before setting state sprites with ShroudSetButtonImage.
+
+local btn = ShroudUIButton(0, 80, 120, 30, 0, 0, UI.None, -1)
+ShroudSetButtonTransition(btn, Transition.ColorTint)
+ShroudSetButtonColor(btn, ButtonMode.Highlighted, "#FFD54FFF")
+
+ShroudGetInputText¶
+
+ShroudGetInputText(id: number) -> string
+
+id: number. The 0-based input id from ShroudUIInput.
+
+Returns: string, the full field contents. Returns nil if id is negative or out of range.
+
+Notes: returns the complete value, not just the portion currently scrolled into view.
+
+local field = ShroudUIInput(0, 0, 200, 24, -1, UI.None)
+local typed = ShroudGetInputText(field)
+if typed ~= nil then
+    ShroudConsoleLog("player entered: " .. typed)
+end
+
+ShroudSetInputText¶
+
+ShroudSetInputText(id: number, text: string) -> boolean
+
+id: number. The 0-based input id from ShroudUIInput.
+
+text: string. The value to place in the field. Defaults to an empty string, so calling with no text clears it.
+
+Returns: boolean. false if id is negative or out of range; otherwise true.
+
+local field = ShroudUIInput(0, 0, 200, 24, -1, UI.None)
+ShroudSetInputText(field, "Britannia")
+
+ShroudSetInputContentType¶
+
+ShroudSetInputContentType(id: number, type: ContentType) -> boolean
+
+id: number. The 0-based input id from ShroudUIInput.
+
+type: ContentType. The validation and keyboard mode. Valid: ContentType.Standard, ContentType.Autocorrected, ContentType.IntegerNumber, ContentType.DecimalNumber, ContentType.Alphanumeric, ContentType.Name, ContentType.EmailAddress, ContentType.Password, ContentType.Pin, ContentType.Custom. Defaults to ContentType.Standard.
+
+Returns: boolean. false if id is negative or out of range; otherwise true.
+
+local pwd = ShroudUIInput(0, 30, 200, 24, -1, UI.None)
+ShroudSetInputContentType(pwd, ContentType.Password)
+
+ShroudSetPlaceholderText¶
+
+ShroudSetPlaceholderText(id: number, text: string) -> boolean
+
+id: number. The 0-based input id from ShroudUIInput.
+
+text: string. The greyed-out hint shown while the field is empty. Defaults to an empty string.
+
+Returns: boolean. false if id is negative or out of range; otherwise true.
+
+local field = ShroudUIInput(0, 60, 200, 24, -1, UI.None)
+ShroudSetPlaceholderText(field, "Enter your name")
+
+ShroudSetInputBackgroundColor¶
+
+ShroudSetInputBackgroundColor(id: number, hexColor: string) -> boolean
+
+id: number. The 0-based input id from ShroudUIInput.
+
+hexColor: string. Unity HTML hex color for the field's background graphic. Include the leading # (for example #202020FF).
+
+Returns: boolean. false if id is negative or out of range; otherwise true.
+
+Notes: the hex string is parsed before the # is applied, so a bare hex value without # fails to parse and leaves the color black. Always pass the leading #.
+
+local field = ShroudUIInput(0, 90, 200, 24, -1, UI.None)
+ShroudSetInputBackgroundColor(field, "#1A1A1AFF")
+
+ShroudSetInputCharacterLimit¶
+
+ShroudSetInputCharacterLimit(id: number, limit: number) -> boolean
+
+id: number. The 0-based input id from ShroudUIInput.
+
+limit: number. Maximum characters the field accepts. Use 0 for no limit.
+
+Returns: boolean. false if id is negative or out of range; otherwise true.
+
+local field = ShroudUIInput(0, 120, 200, 24, -1, UI.None)
+ShroudSetInputCharacterLimit(field, 16)
+
+ShroudSetInputReadonly¶
+
+ShroudSetInputReadonly(id: number, isOn: boolean) -> boolean
+
+id: number. The 0-based input id from ShroudUIInput.
+
+isOn: boolean. true makes the field read-only (no typing), false re-enables editing.
+
+Returns: boolean. false if id is negative or out of range; otherwise true.
+
+local field = ShroudUIInput(0, 150, 200, 24, -1, UI.None)
+ShroudSetInputText(field, "read-only value")
+ShroudSetInputReadonly(field, true)
+
+ShroudGetToggle¶
+
+ShroudGetToggle(id: number) -> boolean
+
+id: number. The 0-based toggle id from ShroudUIToggle.
+
+Returns: boolean, the toggle's checked state (true = checked). Returns nil if id is at or past the top of the range.
+
+Notes: only the upper bound is checked (id < count); there is no >= 0 guard, so a negative id indexes the toggle list with a negative index and throws (a Lua error) rather than returning nil. Only pass ids you got back from ShroudUIToggle.
+
+local box = ShroudUIToggle(0, 0, 20, 20, -1, UI.None)
+if ShroudGetToggle(box) == true then
+    ShroudConsoleLog("option is on")
+end
+
+ShroudSetToggle¶
+
+ShroudSetToggle(id: number, enabled: boolean) -> boolean
+
+id: number. The 0-based toggle id from ShroudUIToggle.
+
+enabled: boolean. true checks the toggle, false unchecks it.
+
+Returns: boolean. false if id is at or past the top of the range; otherwise true.
+
+Notes: only the upper bound is checked (id < count); there is no >= 0 guard, so a negative id indexes the toggle list with a negative index and throws (a Lua error) rather than returning false. Only pass ids you got back from ShroudUIToggle.
+
+local box = ShroudUIToggle(0, 0, 20, 20, -1, UI.None)
+ShroudSetToggle(box, true)
+
+ShroudSetToggleReadonly¶
+
+ShroudSetToggleReadonly(id: number, enabled: boolean) -> boolean
+
+id: number. The 0-based toggle id from ShroudUIToggle.
+
+enabled: boolean. Sets the toggle's interactable flag. The argument is interactability, not read-only-ness: pass true to let the player click it, false to lock it. Despite the name, ShroudSetToggleReadonly(id, true) makes the toggle interactive, and false makes it read-only.
+
+Returns: boolean. false if id is at or past the top of the range; otherwise true.
+
+Notes: only the upper bound is checked (id < count); there is no >= 0 guard, so a negative id indexes the toggle list with a negative index and throws (a Lua error) rather than returning false. Only pass ids you got back from ShroudUIToggle.
+
+local box = ShroudUIToggle(0, 0, 20, 20, -1, UI.None)
+ShroudSetToggle(box, true)
+ShroudSetToggleReadonly(box, false) -- lock it so the player cannot change it
+
+Legacy immediate-mode drawing¶
+
+These functions wrap Unity's IMGUI (GUI.*) and are being phased out in favor of the retained-mode ShroudUI* widgets. They only draw when called from inside your ShroudOnGUI() callback; called anywhere else they do nothing useful. They are immediate-mode, so you must re-issue every call every frame — nothing persists. All coordinates are screen pixels with the origin at the top-left. GOTCHA: despite the lrx/lry parameter names, ShroudGUILabel and ShroudDrawTexture pass those last two values to a Unity Rect as width and height, not as a lower-right corner. ShroudButton, ShroudButtonRepeat, and ShroudDrawTexture require a valid textureID from ShroudLoadTexture and return false (drawing nothing) if the id does not resolve.
+
+Hover tooltips (ShroudGUITooltip, ShroudDrawTextureTooltip, API v3) register a hover region for the current ShroudOnGUI pass; after every addon has drawn, the host renders the topmost hovered region's text in a styled box near the cursor (so an icon's tooltip always draws above the icons it overlaps). See Buff Icons for a worked example that labels each buff icon with its skill name.
+
+Function
+Call
+What it does
+
+ShroudGUILabel
+ShroudGUILabel(ulx, uly, width, height, text)
+Draws a text label in a rect
+
+ShroudButton
+ShroudButton(x, y, width, height, textureID, text, tooltip)
+Draws a clickable button
+
+ShroudButtonRepeat
+ShroudButtonRepeat(x, y, width, height, textureID, text, tooltip)
+Draws a button that fires while held
+
+ShroudDrawTexture
+ShroudDrawTexture(ulx, uly, width, height, textureID)
+Draws a loaded texture in a rect
+
+ShroudDrawTextureTooltip
+ShroudDrawTextureTooltip(ulx, uly, width, height, textureID, text)
+Draws a texture that shows text on hover
+
+ShroudGUITooltip
+ShroudGUITooltip(ulx, uly, width, height, text)
+Registers a hover region with tooltip text
+
+ShroudGUILabel¶
+
+ShroudGUILabel(ulx: number, uly: number, width: number, height: number, text: string) -> boolean
+
+ulx: number. Left edge of the label rect, in screen pixels from the left.
+
+uly: number. Top edge of the label rect, in screen pixels from the top.
+
+width: number. Rect width in pixels. Named lrx/lower-right in older code, but it is used as width.
+
+height: number. Rect height in pixels. Named lry/lower-right in older code, but it is used as height.
+
+text: string. The text to draw, using the default IMGUI label style.
+
+Returns: boolean. Always true; there is no failure sentinel.
+
+Notes: Call only from ShroudOnGUI(); it draws for a single frame, so re-issue it every frame. Marked obsolete in the client and slated for removal.
+
+function ShroudOnGUI()
+    local fps = math.floor(1 / ShroudDeltaTime)
+    ShroudGUILabel(20, 20, 200, 24, "FPS: " .. fps)
+end
+
+ShroudButton¶
+
+ShroudButton(x: number, y: number, width: number, height: number, textureID: number, text: string, tooltip: string) -> boolean
+
+x: number. Left edge of the button rect, in screen pixels.
+
+y: number. Top edge of the button rect, in screen pixels.
+
+width: number. Button width in pixels.
+
+height: number. Button height in pixels.
+
+textureID: number. Texture id from ShroudLoadTexture, drawn as the button image. Required; a bad id makes the call return false and draw nothing.
+
+text: string. Caption drawn on the button. Pass "" for none.
+
+tooltip: string. IMGUI tooltip text. Pass "" for none.
+
+Returns: boolean. true on the frame the button is clicked, otherwise false. Also false if textureID does not resolve, so a click and a missing texture are indistinguishable from the return value alone.
+
+Notes: Call only from ShroudOnGUI(). Because a valid texture is required, load one even for a mostly-text button.
+
+local btnTex = -1
+
+function ShroudOnStart()
+    btnTex = ShroudLoadTexture("button_bg.png")
+end
+
+function ShroudOnGUI()
+    if ShroudButton(40, 60, 120, 30, btnTex, "Wave", "Play the wave emote") then
+        ShroudPlayEmote("wave")
+    end
+end
+
+ShroudButtonRepeat¶
+
+ShroudButtonRepeat(x: number, y: number, width: number, height: number, textureID: number, text: string, tooltip: string) -> boolean
+
+Same as ShroudButton but it returns true on every frame the button is held down, not only on the initial click. Same parameters, same failure sentinel (false when textureID does not resolve), and the same ShroudOnGUI()-only requirement. Use it for hold-to-repeat actions and throttle in your own code, since it can fire many times per second.
+
+function ShroudOnGUI()
+    if ShroudButtonRepeat(40, 100, 120, 30, btnTex, "Scroll", "Hold to scroll") then
+        offset = offset + 1
+    end
+end
+
+ShroudDrawTexture¶
+
+ShroudDrawTexture(ulx: number, uly: number, width: number, height: number, textureID: number) -> boolean
+
+ulx: number. Left edge of the draw rect, in screen pixels.
+
+uly: number. Top edge of the draw rect, in screen pixels.
+
+width: number. Rect width in pixels. Named lrx/lower-right in older code but used as width; the texture is stretched to fill it.
+
+height: number. Rect height in pixels. Named as a lower-right coordinate but used as height.
+
+textureID: number. Texture id from ShroudLoadTexture.
+
+Returns: boolean. true on success, false if textureID does not resolve to a loaded texture.
+
+Notes: Call only from ShroudOnGUI(). The texture is scaled to the rect; query its native size with ShroudGetTextureSize if you need to preserve aspect ratio.
+
+local logo = -1
+
+function ShroudOnStart()
+    logo = ShroudLoadTexture("logo.png")
+end
+
+function ShroudOnGUI()
+    if not ShroudDrawTexture(300, 20, 128, 64, logo) then
+        ShroudConsoleLog("logo texture failed to load")
+    end
+end
+
+ShroudDrawTextureTooltip¶
+
+ShroudDrawTextureTooltip(ulx: number, uly: number, width: number, height: number, textureID: number, text: string) -> boolean (API v3)
+
+ulx, uly, width, height, textureID: same as ShroudDrawTexture.
+
+text: string. Tooltip shown while the cursor is over this rect. An empty/nil string draws the texture with no tooltip.
+
+Returns: boolean. true on success, false if textureID does not resolve (the tooltip region is still registered).
+
+Notes: Call only from ShroudOnGUI(). Draws the texture and registers its hover region in one call. The host renders the tooltip after every addon's ShroudOnGUI, so it always sits above the icons. When rects overlap, the last one drawn under the cursor wins.
+
+function ShroudOnGUI()
+    local tex = ShroudGetBuffIcon(0)
+    if tex >= 0 then
+        ShroudDrawTextureTooltip(40, 220, 40, 40, tex, ShroudGetBuffTooltip(0))
+    end
+end
+
+ShroudGUITooltip¶
+
+ShroudGUITooltip(ulx: number, uly: number, width: number, height: number, text: string) -> boolean (API v3)
+
+ulx, uly, width, height: the hover rect, same convention as ShroudDrawTexture.
+
+text: string. Tooltip shown while the cursor is over the rect.
+
+Returns: boolean. Always true.
+
+Notes: Call only from ShroudOnGUI(). Registers a hover region without drawing anything, so you can attach a tooltip to something you drew yourself (a ShroudGUILabel, a widget, an empty area). Registration lasts one GUI pass; re-issue it every frame.
+
+function ShroudOnGUI()
+    ShroudGUILabel(40, 200, 200, 24, "Focus: " .. ShroudGetStatValueByName("Focus"))
+    ShroudGUITooltip(40, 200, 200, 24, "Your current focus pool")
+end
+
+Textures and sound¶
+
+These functions load and manage addon-supplied textures (PNG/JPG under the addon's Lua folder) and audio clips, and control playback of sounds, the scene music stack, and game effects. Two traps run through the group: every path is confined to the addon folder, so a path that escapes it (via ..) fails with -1 (textures) or false (sound); and the sound system mixes number bases. Sound clip ids passed to ShroudPlaySound are 1-based, ShroudStopSound/ShroudIsChannelPlaying take a 1-based channel, but ShroudPlaySound returns a 0-based channel index, so you must add 1 before feeding it back to a stop/query call. ShroudLoadSound also loads asynchronously: it returns immediately and the clip only appears in ShroudListSound() once the load finishes.
+
+Function
+Call
+What it does
+
+ShroudLoadTexture
+ShroudLoadTexture(path)
+Load an image file as a texture handle
+
+ShroudSetTextureClamp
+ShroudSetTextureClamp(id, clamp)
+Set a texture's wrap mode clamp/repeat
+
+ShroudGetTextureSize
+ShroudGetTextureSize(id)
+Return a texture's pixel width and height
+
+ShroudLoadSound
+ShroudLoadSound(path, audioType)
+Start async load of an audio clip
+
+ShroudListSound
+ShroudListSound()
+List names of loaded sound clips
+
+ShroudListSoundReset
+ShroudListSoundReset()
+Stop all channels and clear loaded clips
+
+ShroudPlaySound
+ShroudPlaySound(id, volume)
+Play a loaded clip, returns its channel
+
+ShroudStopSound
+ShroudStopSound(channel)
+Stop a playing channel
+
+ShroudIsChannelPlaying
+ShroudIsChannelPlaying(channel)
+Name of the clip on a channel
+
+ShroudStopUISound
+ShroudStopUISound()
+Stop the game's current UI sound
+
+ShroudSceneMusic
+ShroudSceneMusic(active)
+Resume or stop the scene music stack
+
+ShroudStopFX
+ShroudStopFX(fxName)
+Stop a tracked game effect by name
+
+ShroudLoadTexture¶
+
+ShroudLoadTexture(path: string) -> number
+
+path (string): file path relative to the addon's Lua folder (for example "images/icon.png"). PNG and JPG are decoded by Texture2D.LoadImage.
+
+Returns a texture handle (number, starting at 1) used by the texture, image, and draw functions. Returns -1 if the file does not exist, fails to decode, or the path escapes the addon folder.
+
+Notes: loading the same file path twice returns the same handle (results are cached by path, case-insensitive). The default wrap mode is Repeat; use ShroudSetTextureClamp to switch it to Clamp.
+
+local tex = ShroudLoadTexture("images/banner.png")
+if tex == -1 then
+    ShroudConsoleLog("banner.png failed to load")
+else
+    -- draw it into an image widget created elsewhere
+    ShroudModifyImage(imageId, UI.Image, tex)
+end
+
+ShroudSetTextureClamp¶
+
+ShroudSetTextureClamp(id: number, clamp: boolean) -> boolean
+
+id (number): a texture handle from ShroudLoadTexture.
+
+clamp (boolean): true sets wrap mode Clamp (edge pixels stretch, no tiling); false sets Repeat (tiling).
+
+Returns true on success, false if the handle is unknown.
+
+local tex = ShroudLoadTexture("images/frame.png")
+ShroudSetTextureClamp(tex, true)
+
+ShroudGetTextureSize¶
+
+ShroudGetTextureSize(id: number) -> number, number
+
+id (number): a texture handle from ShroudLoadTexture.
+
+Returns two numbers, the texture's pixel width and height, as a multi-value tuple. Returns nil (a single value) if the handle is unknown, so guard the first return before use.
+
+local tex = ShroudLoadTexture("images/map.png")
+local w, h = ShroudGetTextureSize(tex)
+if w ~= nil then
+    ShroudConsoleLog("map is " .. w .. "x" .. h)
+end
+
+ShroudLoadSound¶
+
+ShroudLoadSound(path: string, audioType: AudioType.OGGVORBIS) -> boolean
+
+path (string): file path relative to the addon's Lua folder.
+
+audioType (enum): the clip's real format, from the exposed AudioType enum. Useful members: AudioType.WAV, AudioType.OGGVORBIS, AudioType.MPEG. It must match the file's actual encoding.
+
+Returns true if the load request was accepted (path exists inside the addon folder), false if the path escapes the folder. true does NOT mean the clip is ready.
+
+Notes: the load runs asynchronously on a coroutine. The clip is appended to the sound list only when the web request completes, so its playable id (its 1-based position in that list) is assigned by load-completion order. Poll ShroudListSound to find loaded clips before calling ShroudPlaySound. Decode errors are logged, not returned.
+
+ShroudLoadSound("sounds/chime.ogg", AudioType.OGGVORBIS)
+-- later, once the load has finished:
+for i, name in ipairs(ShroudListSound()) do
+    ShroudConsoleLog("clip " .. i .. " = " .. name)
+end
+
+ShroudListSound¶
+
+ShroudListSound() -> list
+
+Returns a list (table) of the names of every loaded sound clip, in load order. The 1-based index into this list is the id you pass to ShroudPlaySound. Returns an empty list when nothing is loaded.
+
+local clips = ShroudListSound()
+if #clips > 0 then
+    ShroudPlaySound(1, 80)  -- play the first loaded clip at 80% volume
+end
+
+ShroudListSoundReset¶
+
+ShroudListSoundReset() -> boolean
+
+Stops every playback channel and clears the loaded-clip list, invalidating all clip ids. Returns true if any clips were loaded (and were cleared), false if the list was already empty.
+
+Notes: after a reset, clip ids restart from 1 as new clips load.
+
+if ShroudListSoundReset() then
+    ShroudConsoleLog("sound cache cleared")
+end
+
+ShroudPlaySound¶
+
+ShroudPlaySound(id: number, volume: number) -> number
+
+id (number): 1-based clip id, its position in ShroudListSound. Values of 0 or greater than the loaded count are rejected.
+
+volume (number): playback volume 0 to 100 (converted internally to 0.0 to 1.0).
+
+Returns the 0-based channel index (0 to 4) the clip started on. Returns -1 if the id is invalid or all five channels are already busy.
+
+Notes: there are five playback channels. The returned index is 0-based, but ShroudStopSound and ShroudIsChannelPlaying take a 1-based channel, so add 1 before passing it back. Playing a sound also fires the addon's ShroudOnPlaySound callback with the clip name.
+
+local ch = ShroudPlaySound(1, 75)
+if ch >= 0 then
+    -- convert the 0-based return to the 1-based channel the stop/query calls expect
+    local channel = ch + 1
+    ShroudConsoleLog("playing on channel " .. channel)
+end
+
+ShroudStopSound¶
+
+ShroudStopSound(channel: number) -> boolean
+
+channel (number): 1-based channel number, 1 to 5. Remember ShroudPlaySound returns a 0-based index, so add 1.
+
+Returns true if that channel was playing and was stopped, false if the channel number is out of range or nothing was playing on it.
+
+local ch = ShroudPlaySound(2, 60)
+if ch >= 0 then
+    ShroudStopSound(ch + 1)  -- stop it immediately
+end
+
+ShroudIsChannelPlaying¶
+
+ShroudIsChannelPlaying(channel: number) -> string
+
+channel (number): 1-based channel number, 1 to 5.
+
+Returns the name of the clip currently playing on that channel, or an empty string "" if the channel is out of range or idle.
+
+local name = ShroudIsChannelPlaying(1)
+if name ~= "" then
+    ShroudConsoleLog("channel 1 is playing " .. name)
+end
+
+ShroudStopUISound¶
+
+ShroudStopUISound() -> boolean
+
+Stops the game's currently playing UI sound effect (through the game audio manager), not addon-loaded clips. Returns true if the audio manager was available, false otherwise.
+
+ShroudStopUISound()
+
+ShroudSceneMusic¶
+
+ShroudSceneMusic(active: boolean) -> boolean
+
+active (boolean): true resumes the scene's default music stack; false stops the music stack.
+
+Returns true in both cases. This drives the game's music, independent of addon-loaded sounds.
+
+-- mute scene music while your addon plays its own audio
+ShroudSceneMusic(false)
+ShroudPlaySound(1, 100)
+
+ShroudStopFX¶
+
+ShroudStopFX(fxName: string) -> boolean
+
+fxName (string): the GameObject name of a game effect the addon is tracking. The addon only tracks effects it was notified of through the ShroudOnPlayFX callback.
+
+Returns true if a tracked effect with that name was found and ended, false if no such effect is tracked.
+
+Notes: the call also prunes destroyed effects from the tracked list as a side effect.
+
+-- ShroudOnPlayFX(name, isOn) records fxName when the game starts an effect
+function ShroudOnPlayFX(name, isOn)
+    if isOn and name == "Fx_Torch" then
+        ShroudStopFX(name)  -- suppress that effect
+    end
+end
+
+Console, garbage collection, and timers¶
+
+Output, memory, and timer utilities. ShroudConsoleLog and the overridden print write to the in-game Lua chat console; ShroudUseLuaConsoleForPrint chooses whether print goes there or to the player-invisible engine log. The collectgarbage built-in is replaced with a client-safe version (#914) so an addon cannot stall or disable the shared GC. Timers are named: ShroudRegisterPeriodic calls a named global function on an interval, and the throttle is a 0.01s minimum period. These functions are valid at any time (they do not require a callback context), but the settings they change (print routing, the periodic list) are process-wide and shared by every loaded addon.
+
+Function
+Call
+What it does
+
+ShroudConsoleLog
+ShroudConsoleLog(message)
+Write a line to the Lua chat console
+
+ShroudUseLuaConsoleForPrint
+ShroudUseLuaConsoleForPrint(useConsole)
+Route print to chat or to the engine log
+
+print
+print(...)
+Overridden: prints to the Lua chat console
+
+collectgarbage
+collectgarbage(mode, arg)
+Overridden: measure or step the managed GC
+
+ShroudForceGC
+ShroudForceGC()
+Run a full blocking garbage collect
+
+ShroudRegisterPeriodic
+ShroudRegisterPeriodic(name, functionName, period, repeating)
+Call a named function on a timer
+
+ShroudRemovePeriodic
+ShroudRemovePeriodic(name)
+Cancel a named timer
+
+ShroudListPeriodics
+ShroudListPeriodics()
+List the names of active timers
+
+ShroudConsoleLog¶
+
+ShroudConsoleLog(message: string) -> string
+
+message (string): the text to print. [url... markup is defused to [... before display.
+
+Returns (string): the message actually logged (with the [url substitution applied). Returns nil if message was nil.
+
+Notes: writes a chat entry of type LuaMessage with ForceVisible = false, so it appears in the chat log but does not force the chat window open. The un-prefixed alias ConsoleLog is registered to the same function.
+
+local scene = ShroudGetCurrentSceneName()
+ShroudConsoleLog("Addon loaded in scene: " .. scene)
+
+ShroudUseLuaConsoleForPrint¶
+
+ShroudUseLuaConsoleForPrint(useConsole: boolean) -> boolean
+
+useConsole (boolean): true routes print output to the in-game Lua chat console (via ShroudConsoleLog); false routes it to the engine's Console.WriteLine, which players do not see.
+
+Returns (boolean): always true.
+
+Notes: this sets Script.DefaultOptions.DebugPrint, which is process-wide, so it changes print routing for every loaded addon, not just yours. The default at startup is the chat console (true).
+
+-- Send print output to the engine log instead of player chat while debugging.
+ShroudUseLuaConsoleForPrint(false)
+print("this goes to the engine log, not chat")
+ShroudUseLuaConsoleForPrint(true)
+
+print¶
+
+print(...) -> nil
+
+... (any): one or more values, converted to strings and joined with tabs, exactly like standard Lua print.
+
+Returns (nil).
+
+Notes: this host overrides the stock print. Output is routed through Script.DefaultOptions.DebugPrint, which by default is the Lua chat console, so print writes to in-game chat like ShroudConsoleLog. ShroudUseLuaConsoleForPrint(false) redirects it to the player-invisible engine log; ShroudUseLuaConsoleForPrint(true) restores chat output. The routing is shared by all addons.
+
+local hp = ShroudPlayerCurrentHealth
+print("Health is", hp)  -- appears in the Lua chat console
+
+collectgarbage¶
+
+collectgarbage(mode: string, arg: number) -> number | boolean | (number, number) | nil
+
+mode (string, optional): one of "collect", "restart", "count", "step", "isrunning", or any other Lua 5.2 mode name. Absent is treated as "collect".
+
+arg (number, optional): only used with "step", where it is a millisecond time budget for the incremental collect (default 3, clamped to the 0.1–50 range). Note this is a time budget, not Lua's KB step size.
+
+Returns: depends on mode — "collect"/"restart"/absent run a full blocking collect and return the number 0; "count" returns two numbers (managedKB, bytesMod1024) from the managed heap; "step" returns a boolean that is true when the collection cycle is complete; "isrunning" returns a boolean; any other mode ("stop", "setpause", "setstepmul", ...) returns nil.
+
+Notes: this replaces MoonSharp's stock collectgarbage (#914). Modes that would let an addon disable the GC shared by the whole client are intentionally no-ops returning nil. "step" never falls back to a blocking collect; when incremental GC is unavailable it self-guards and reports complete. Prefer "step" over the blocking "collect" to avoid a 140–190ms stall.
+
+local kb = collectgarbage("count")           -- managed heap size in KB
+ShroudConsoleLog(string.format("Lua heap: %.0f KB", kb))
+local done = collectgarbage("step", 2)        -- 2ms incremental slice
+if not done then ShroudConsoleLog("GC has more work to do") end
+
+ShroudForceGC¶
+
+ShroudForceGC() -> boolean
+
+Returns (boolean): always true.
+
+Notes: runs a full, blocking Gen2 GC.Collect(), which can stall the client for roughly 140–190ms. Prefer collectgarbage("step") for incremental collection; use this only when a hard, immediate collect is genuinely needed.
+
+ShroudForceGC()
+ShroudConsoleLog("Heap after forced GC: " .. tostring(collectgarbage("count")) .. " KB")
+
+ShroudRegisterPeriodic¶
+
+ShroudRegisterPeriodic(name: string, functionName: string, period: number, repeating: boolean) -> boolean
+
+name (string): an identifier for this timer, used later with ShroudRemovePeriodic and shown by ShroudListPeriodics. Registering a name that already exists removes the previous timer with that name first.
+
+functionName (string): the name of a global function to call. It is looked up in the script globals at registration time; the function is invoked with no arguments.
+
+period (number): seconds between calls. Must be at least 0.01; a smaller value registers nothing and returns false.
+
+repeating (boolean): true fires every period seconds; false fires once and then removes itself.
+
+Returns (boolean): true on success, false if period is below 0.01 or functionName does not resolve to an existing global value.
+
+Notes: the target is resolved by name, so define the function as a global before calling this. The callback takes no parameters — read whatever state it needs from the API directly.
+
+function TickHealth()
+    ShroudConsoleLog("HP: " .. ShroudPlayerCurrentHealth)
+end
+-- Call TickHealth every 5 seconds under the name "hpwatch".
+ShroudRegisterPeriodic("hpwatch", "TickHealth", 5.0, true)
+
+ShroudRemovePeriodic¶
+
+ShroudRemovePeriodic(name: string) -> boolean
+
+name (string): the timer identifier passed to ShroudRegisterPeriodic.
+
+Returns (boolean): true if a timer with that name was found and removed, false if no such timer exists.
+
+if ShroudRemovePeriodic("hpwatch") then
+    ShroudConsoleLog("Stopped the hpwatch timer")
+end
+
+ShroudListPeriodics¶
+
+ShroudListPeriodics() -> list
+
+Returns (list): the names of all currently registered timers. Empty when none are active.
+
+Notes: the value is a MoonSharp enumerator over the names, so drive it with a generic for as shown. Names appear in scheduled-time order.
+
+for name in ShroudListPeriodics() do
+    ShroudConsoleLog("Active timer: " .. name)
+end
+
+Ink conversation bridge¶
+
+These four functions read and write the same per-character variable store that player-authored custom-NPC Ink scripts use through their saveVariable/loadVariable external functions, letting an addon and a conversation share state. Each value lives in a PlayerPrefs key formed as <characterName>.Ink_<varName>, so varName must be a non-empty Lua string (no numeric coercion) and a character must be logged in — otherwise the load/has/delete calls return nil or false and a save returns false. Values are stored as strings: integral numbers are written without a decimal point ("42"), booleans map to "1"/"0", and the read side always hands back a string. Writes are not flushed immediately (they persist on a clean client quit), and a running conversation only observes an addon's write at its next loadVariable.
+
+Function
+Call
+What it does
+
+ShroudLoadInkVariable
+ShroudLoadInkVariable(varName)
+Read a stored Ink variable as a string
+
+ShroudSaveInkVariable
+ShroudSaveInkVariable(varName, value)
+Store a string, number, or boolean
+
+ShroudHasInkVariable
+ShroudHasInkVariable(varName)
+Test whether a value is stored
+
+ShroudDeleteInkVariable
+ShroudDeleteInkVariable(varName)
+Remove a stored value
+
+ShroudLoadInkVariable¶
+
+ShroudLoadInkVariable(varName: string) -> string | nil
+
+varName (string): variable name, shared with the Ink side. Must be a non-empty string; a number or other type is rejected.
+
+Returns: the stored value as a string, or nil when no value is stored, when varName is not a non-empty string, or when no character is logged in.
+
+Notes: existence is exact — a value that was saved as an empty string, or the literal "null" the Ink side treats as its own unsaved sentinel, still comes back as a string, not nil.
+
+local greeted = ShroudLoadInkVariable("met_the_smith")
+if greeted == "1" then
+    ShroudConsoleLog("Player already met the smith")
+else
+    ShroudConsoleLog("First visit to the smith")
+end
+
+ShroudSaveInkVariable¶
+
+ShroudSaveInkVariable(varName: string, value: string | number | boolean) -> boolean
+
+varName (string): variable name to write. Must be a non-empty string.
+
+value (string, number, or boolean): the value to store. A string is capped at 8192 characters; an integral number in the range +/-9.2e18 is written with no decimal point so the Ink side parses it back as an int; a boolean stores as "1" or "0".
+
+Returns: boolean. true on success; false when varName is not a non-empty string, when no character is logged in, when the value type is not string/number/boolean, when a string exceeds 8192 characters, or when a number is NaN or infinite.
+
+Notes: the write is not flushed to disk immediately (parity with the Ink side, and to avoid main-thread I/O from an addon writing every frame); Unity persists it on a clean quit. A conversation in progress sees the new value only at its next loadVariable.
+
+local ok = ShroudSaveInkVariable("reputation", 42)
+if ok then
+    ShroudConsoleLog("Reputation stored for this conversation")
+else
+    ShroudConsoleLog("Save failed (logged out or bad value)")
+end
+
+ShroudHasInkVariable¶
+
+ShroudHasInkVariable(varName: string) -> boolean
+
+varName (string): variable name to test. Must be a non-empty string.
+
+Returns: boolean. true only when a value is stored for this character under varName; false when nothing is stored, when varName is not a non-empty string, or when no character is logged in.
+
+if not ShroudHasInkVariable("quest_started") then
+    ShroudSaveInkVariable("quest_started", true)
+    ShroudConsoleLog("Marked quest as started")
+end
+
+ShroudDeleteInkVariable¶
+
+ShroudDeleteInkVariable(varName: string) -> boolean
+
+varName (string): variable name to remove. Must be a non-empty string.
+
+Returns: boolean. true when a stored value existed and was removed; false when nothing was stored, when varName is not a non-empty string, or when no character is logged in.
+
+if ShroudDeleteInkVariable("temp_flag") then
+    ShroudConsoleLog("Cleared temp_flag")
+else
+    ShroudConsoleLog("Nothing to clear")
+end
+
+Saved variables¶
+
+Per-addon persistent storage. Each value is written into a JSON file inside the addon sandbox at Lua/SavedVariables/<addon>.<character>.character.json (character scope, one file per character) or Lua/SavedVariables/<addon>.account.json (account scope, shared across characters on this install). The scope argument is an optional string, "character" (the default) or "account"; any other value, including nil, normalizes to "character". Keys are strings up to 128 characters with no control characters and no / or \; an invalid key makes the setters return false and the getter return nil. Writes do not hit disk on every call: ShroudSetSavedVar/ShroudDeleteSavedVar only mark the addon's table dirty, and the dirty tables are flushed at logout, on addon disable/unload, at application quit, and when you call ShroudFlushSavedVars.
+
+Function
+Call
+What it does
+
+ShroudSetSavedVar
+ShroudSetSavedVar(key, value, scope)
+Store a value under a key
+
+ShroudGetSavedVar
+ShroudGetSavedVar(key, scope)
+Read a stored value
+
+ShroudDeleteSavedVar
+ShroudDeleteSavedVar(key, scope)
+Remove a stored key
+
+ShroudFlushSavedVars
+ShroudFlushSavedVars()
+Write dirty tables to disk now
+
+ShroudSetSavedVar¶
+
+ShroudSetSavedVar(key: string, value: string|number|boolean|table|nil, scope: string) -> boolean
+
+key: string. The storage name. Must be non-empty, at most 128 characters, with no control characters and no / or \.
+
+value: string, number, boolean, table, or nil. Tables may be nested; they are JSON-serialized on flush. Functions, threads, and userdata are not persistable and cause the call to fail.
+
+scope: string, optional. "character" (default) or "account"; matched case-insensitively, anything else falls back to "character".
+
+Returns: boolean. true when the value was stored (table marked dirty) — a nil value counts as stored and returns true — false on an invalid key or a non-persistable value type.
+
+Notes: does not write to disk. It updates the in-memory table and marks it dirty; the file is written on the next flush trigger (logout, disable/unload, quit, or ShroudFlushSavedVars). Character scope is keyed by the current character, so the same key holds independent values on different characters.
+
+local runs = ShroudGetSavedVar("runCount") or 0
+runs = runs + 1
+if ShroudSetSavedVar("runCount", runs) then
+    ShroudConsoleLog("This addon has now started " .. runs .. " times")
+end
+
+-- account-wide preference, visible to all characters
+ShroudSetSavedVar("theme", "dark", "account")
+
+ShroudGetSavedVar¶
+
+ShroudGetSavedVar(key: string, scope: string) -> string|number|boolean|table|nil
+
+key: string. The storage name to read. Same validity rules as ShroudSetSavedVar.
+
+scope: string, optional. "character" (default) or "account"; must match the scope the value was stored under.
+
+Returns: the stored value with its original Lua type (string, number, boolean, or table), or nil if the key is unset, the key is invalid, or no saved-variable table exists yet for that addon and scope.
+
+Notes: a stored table is returned by reference to the in-memory copy; mutating its fields changes the cached value, but you still must call ShroudSetSavedVar (or otherwise mark the table dirty) for the change to be flagged for the next flush.
+
+local prefs = ShroudGetSavedVar("windowPos")
+if prefs then
+    ShroudSetSize(panelId, UI.Panel, prefs.w, prefs.h)
+else
+    ShroudConsoleLog("No saved window position yet")
+end
+
+ShroudDeleteSavedVar¶
+
+ShroudDeleteSavedVar(key: string, scope: string) -> boolean
+
+key: string. The stored key to remove. Same validity rules as ShroudSetSavedVar.
+
+scope: string, optional. "character" (default) or "account".
+
+Returns: boolean. true when the key existed and was removed (table marked dirty), false on an invalid key, a missing table, or a key that was not present.
+
+Notes: like the setter, this only marks the table dirty; the deletion reaches disk on the next flush.
+
+if ShroudDeleteSavedVar("runCount") then
+    ShroudConsoleLog("Cleared the saved run counter")
+end
+
+ShroudFlushSavedVars¶
+
+ShroudFlushSavedVars() -> boolean
+
+Returns: boolean. true if every dirty addon table was written (also true when nothing was dirty), false if any file failed to write or a table exceeded the 256 KB serialized limit.
+
+Notes: forces an immediate write of all pending changes rather than waiting for logout, disable/unload, or quit. A table whose JSON exceeds 256 KB is skipped, not written, and logs a size-limit message to the addon console; the call then returns false.
+
+ShroudSetSavedVar("lastSeen", ShroudGetGameTime().Day, "account")
+if not ShroudFlushSavedVars() then
+    ShroudConsoleLog("Saved variables did not fully write; check size limits")
+end
+
+Data shapes¶
+
+Several API functions return C# objects as Lua userdata with readable fields. Field names and casing below are exactly what Lua sees; read them with dot access (for example info.Name). These are read-only snapshots taken at call time.
+
+RuneEffects¶
+
+Returned as a list by ShroudGetPlayerBuff, ShroudGetPetBuff, and ShroudGetTargetBuff. One entry per active rune/effect group.
+
+Field
+Type
+Meaning
+
+RuneName
+string
+Display name of the rune/effect.
+
+Effects
+list
+List of BuffEffects components under this rune.
+
+RuneId
+number
+Rune definition id.
+
+IsDebuff
+boolean
+True if the effect is harmful.
+
+StackCount
+number
+Count of entries in Effects.
+
+StackCount is #Effects, not a true stack count. A rune that applies several effect components counts each one, so treat it as an upper bound.
+
+The buff list is a fresh snapshot each call. Call once per frame and reuse it.
+
+BuffEffects¶
+
+Nested inside RuneEffects.Effects; not returned on its own. One entry per effect component of a rune.
+
+Field
+Type
+Meaning
+
+Description
+string
+Human-readable effect description.
+
+Value
+number
+Effect magnitude.
+
+CurrentDuration
+number
+Seconds remaining.
+
+TotalDuration
+number
+Full duration in seconds.
+
+TotalTick
+number
+Number of ticks over the effect's life.
+
+PetInfo¶
+
+Returned by ShroudGetPetInfo; nil when there is no primary pet.
+
+Field
+Type
+Meaning
+
+Name
+string
+Pet name.
+
+Level
+number
+Pet level.
+
+isSummon
+boolean
+True if the pet is a summoned creature.
+
+Strength
+number
+Strength attribute.
+
+Dexterity
+number
+Dexterity attribute.
+
+Intelligence
+number
+Intelligence attribute.
+
+CurrentHealth
+number
+Current hit points.
+
+MaxHealth
+number
+Maximum hit points.
+
+HealthRegen
+number
+Out-of-combat health regen.
+
+HealthRegenCombat
+number
+In-combat health regen.
+
+AttackSpeed
+number
+Attack speed.
+
+Absorb
+number
+Physical damage absorbed.
+
+Resist
+number
+Physical resistance.
+
+MagicResist
+number
+Magic resistance.
+
+TauntPower
+number
+Taunt strength.
+
+StrengthPower
+number
+Strength-derived power.
+
+CriticalHit
+number
+Critical hit chance/power.
+
+MoveSpeed
+number
+Movement speed.
+
+MoveRate
+number
+Movement rate.
+
+Focus fields are not exposed; pets report health only.
+
+isSummon is lower-camelCase, unlike the other fields.
+
+GameTime¶
+
+Returned by ShroudGetGameTime.
+
+Field
+Type
+Meaning
+
+Day
+number
+Day of the month.
+
+Hour
+number
+Hour of the in-game day (fractional).
+
+Month
+number
+Month of the year.
+
+Year
+number
+In-game year.
+
+PeriodOfDay
+string
+Named period (for example dawn, day, dusk, night).
+
+Season
+string
+Named season.
+
+Day and Month are the engine value +1, so they read as 1-based calendar numbers.
+
+SceneCap¶
+
+Returned by ShroudGetSceneCap.
+
+Field
+Type
+Meaning
+
+Level
+number
+Adventurer/effective level cap for the current scene.
+
+Skill
+number
+Skill cap for the current scene.
+
+Deck¶
+
+Returned by ShroudCurrentDeck (single value), and as a list by ShroudDeckList and ShroudGetDeckCardList.
+
+Field
+Type
+Meaning
+
+id
+string
+Deck or card identifier.
+
+name
+string
+Deck or card display name.
+
+quantity
+number
+Card count (deck size, or copies of a card).
+
+The same shape is reused for whole decks and for individual cards depending on the function that returns it.
+
+LuaVector2¶
+
+Returned by ShroudGetPosition.
+
+Field
+Type
+Meaning
+
+x
+number
+X coordinate.
+
+y
+number
+Y coordinate.
+
+LuaVector3¶
+
+Returned by ShroudWorldToScreenPoint.
+
+Field
+Type
+Meaning
+
+x
+number
+X coordinate.
+
+y
+number
+Y coordinate.
+
+z
+number
+Z coordinate (depth for screen-point results).
+
+local t = ShroudGetGameTime()
+if t ~= nil then
+    -- Day and Month are 1-based (engine value +1)
+    ShroudConsoleLog(string.format("Day %d of month %d, %s (%s)",
+        t.Day, t.Month, t.PeriodOfDay, t.Season))
+end
+
+Frozen quirks¶
+
+These behaviors are deliberate and load-bearing. Shipped addons already depend on each one, so the client preserves them exactly. Treat them as part of the contract, not as bugs to work around or report.
+
+Quirk
+What to expect
+
+Mixed index bases: widgets, stats, and buffs are 0-based; sound ids and channels are 1-based
+Widget handles (UI.Image, UI.Panel, ...), the stat number passed to ShroudGetStatValueByNumber(number: number), and the buff index passed to ShroudGetBuffName(index: number) all start at 0 and run to count - 1. Sound ids passed to ShroudPlaySound(id: number, volume: number) start at 1 (id 0 is rejected and returns -1), and channel arguments to ShroudStopSound(channel: number) / ShroudIsChannelPlaying(channel: number) are also 1-based (channel 0 is rejected). Do not assume one convention across the API; index by domain.
+
+ShroudPlaySound returns a 0-based channel even though channels are otherwise 1-based
+The return value is the raw audio-source slot, 0-based (first slot returns 0), or -1 on failure (id out of range or no free slot). But ShroudStopSound and ShroudIsChannelPlaying expect a 1-based channel. To stop the sound you just started, add 1 to the value ShroudPlaySound returned.
+
+The ShroudSetDragguable / ShroudUnsetDragguable spelling
+The drag-enable functions are misspelled with a double g ("Dragguable"). The correct, working names are ShroudSetDragguable(id: number, kind: UI.Image) and ShroudUnsetDragguable(id: number, kind: UI.Image), each returning boolean. A correctly spelled "Draggable" does not exist; call the misspelled names.
+
+ShroudGetGameTime Day and Month are engine value +1
+The returned table has Day and Month already incremented by one over the engine's internal 0-based counters, so they read as human 1-based calendar values. Hour, Year, PeriodOfDay, and Season are passed through unchanged. Do not add your own +1. (When game time is unavailable the whole table returns zeros, including Day = 0 / Month = 0.)
+
+ShroudSetParent returns -1 even on success
+ShroudSetParent(id: number, kind: UI.Image, parentId: number, parentKind: UI.Image): number always returns -1, whether or not the reparent happened. The return value carries no success information. Ignore it and verify the effect visually or by layout, not by the result code.
+
+Un-prefixed aliases for a few calls
+Five functions are also registered without the Shroud prefix, kept for old addons: ConsoleLog(message: string), GetStatCount(), GetStatValueByNumber(number: number), GetStatNameByNumber(number: number), and GetStatValueByName(name: string). They are exact aliases of their Shroud-prefixed forms. Prefer the prefixed names in new code; the bare names will keep working.
+
+ShroudSwitchDeck is a stub
+ShroudSwitchDeck(deck: number): boolean does nothing and always returns false. It never changes the active deck. Do not call it expecting a deck swap; there is no Lua path to switch decks.
+
+Stat getters return sentinel values, not nil, for hidden or out-of-range stats
+For an invisible or out-of-range stat number, the stat getters return -999 (numeric getters) or "INVALID" (name/description getters) instead of nil. The numeric sentinel is exposed as the global InvalidStatResult (= -999). ShroudGetStatCount() reports the full stat enum size, which includes hidden slots, so a plain 0..count-1 loop will hit slots that return these sentinels. Compare against InvalidStatResult / "INVALID" rather than testing for nil.
+
+Buff getters return "Invalid" / -1, not nil, when the index is past the end
+ShroudGetBuffName(index) and ShroudGetBuffDescription(index) return the string "Invalid" and ShroudGetBuffTimeRemaining(index) returns -1 when index is at or beyond the current buff count. They guard only the upper bound: a negative index is not checked and can error. Read ShroudGetBuffCount() first and iterate 0..count-1.
+
+Shroud of the Avatar · community Lua addon documentation. Generated from the client bindings. Docs home · Addon store

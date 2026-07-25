@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide &middot; SotA Lua Addons</title>
+<meta name="robots" content="index,follow">
+<meta name="description" content="Documentation for writing Lua addons for Shroud of the Avatar.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html" style="text-decoration:none">
+    <span class="crest">SotA</span><span class="title">Lua <b>Addons</b></span>
+  </a>
+  <button class="menu-toggle" aria-label="Toggle navigation">&#9776;</button>
+  <nav class="topnav">
+    <a href="index.html">Home</a>
+    <a href="guide.html" class="active">Guide</a>
+    <a href="reference.html">API Reference</a>
+    <a href="internals.html">Host internals</a>
+    <a href="agent.html">Agent reference</a>
+    <a href="https://addons.catnipgames.net" target="_blank" rel="noopener">Addon store &#8599;</a>
+  </nav>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <input type="text" class="side-search" id="side-search" placeholder="Filter 15 entries..." autocomplete="off">
+  <div id="search-results"></div>
+  <div class="side-title">On this page</div>
+  <nav id="side-nav">
+<a href="#installing-and-enabling-an-addon">Installing and enabling an addon</a>
+<a href="#addon-metadata">Addon metadata</a>
+<a href="#the-addon-lifecycle-and-callbacks">The addon lifecycle and callbacks</a>
+<a href="#reading-game-state">Reading game state</a>
+<a href="#drawing-ui">Drawing UI</a>
+<a href="#saving-settings">Saving settings</a>
+<a href="#feature-detection">Feature detection</a>
+<a href="#the-sandbox">The sandbox</a>
+<a href="#migrating-an-existing-addon-phase-01-changes">Migrating an existing addon (Phase 0/1 changes)</a>
+<a href="#sharing-addons-the-community-addons-window">Sharing addons: the Community Addons window</a>
+<a href="#submitting-your-own-addon">Submitting your own addon</a>
+  </nav>
+</aside>
+  <main class="content"><div class="prose">
+<h1 id="lua-addon-authoring-guide">Lua addon authoring guide<a class="headerlink" href="#lua-addon-authoring-guide" title="Link to this section">&para;</a></h1>
+<p>This is the player-facing guide to writing Lua addons for the game. It covers how addons load, the
+callbacks you can implement, what the API lets you read and draw, how to save settings, feature
+detection, the sandbox rules, and — at the end — the <strong>adjustments existing addons need</strong> after the
+Phase 0/1 hardening.</p>
+<p>For the exhaustive function-by-function list, see the <a href="reference.html">Lua addon API reference</a>.
+For the internals, see <a href="internals.html">host internals</a>.</p>
+<h2 id="installing-and-enabling-an-addon">Installing and enabling an addon<a class="headerlink" href="#installing-and-enabling-an-addon" title="Link to this section">&para;</a></h2>
+<p>Addons are plain <code>*.lua</code> files in your game data <code>Lua/</code> folder. Open it in-game with the addon
+manager's <strong>Open Folder</strong> button, or the <code>/lua path</code> chat command.</p>
+<p>Newly added addons load <strong>disabled</strong>. After dropping a file in, open the addon manager and toggle it
+on (you will also see a "New Lua addon(s) detected and left disabled" line in chat). This is a safety
+change: a file you just downloaded does not run until you say so.</p>
+<p>Reload all addons with <code>/lua reload</code> (or the manager's <strong>Reload All</strong> button). Unload them with
+<code>/lua unload</code>.</p>
+<h2 id="addon-metadata">Addon metadata<a class="headerlink" href="#addon-metadata" title="Link to this section">&para;</a></h2>
+<p>The manager reads five optional fields from the top of your file. Declare them as locals with this
+exact form:</p>
+<pre><code class="language-lua">local ScriptName = &quot;My HUD&quot;
+local Version = &quot;1.0&quot;
+local CreatorName = &quot;YourName&quot;
+local Description = &quot;A heads-up display.&quot;
+local IconPath = &quot;icon.png&quot;   -- relative to the Lua folder
+</code></pre>
+<h2 id="the-addon-lifecycle-and-callbacks">The addon lifecycle and callbacks<a class="headerlink" href="#the-addon-lifecycle-and-callbacks" title="Link to this section">&para;</a></h2>
+<p>Your addon is a script that defines global functions the game calls. Define only the ones you need.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Callback</th>
+<th>When it fires</th>
+<th>Arguments</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ShroudOnStart()</code></td>
+<td>Once, when the addon loads or is enabled</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>ShroudOnUpdate()</code></td>
+<td>Every frame</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>ShroudOnGUI()</code></td>
+<td>Every IMGUI event (legacy drawing)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>ShroudOnConsoleInput(type, sourcePlayer, message)</code></td>
+<td>Each incoming chat line</td>
+<td>strings</td>
+</tr>
+<tr>
+<td><code>ShroudOnExperienceGain(type, amount)</code></td>
+<td>On XP gain (<code>"Adventurer"</code>/<code>"Producer"</code>)</td>
+<td>string, number</td>
+</tr>
+<tr>
+<td><code>ShroudOnMouseOver(id, kind)</code> / <code>ShroudOnMouseOut(id, kind)</code></td>
+<td>Hover enter/exit of one of <em>your</em> widgets</td>
+<td>int, UI</td>
+</tr>
+<tr>
+<td><code>ShroudOnMouseClick(id, kind)</code></td>
+<td>Click on one of your widgets</td>
+<td>int, UI</td>
+</tr>
+<tr>
+<td><code>ShroudOnInputChange(id, text)</code></td>
+<td>Your input field changed</td>
+<td>int, string</td>
+</tr>
+<tr>
+<td><code>ShroudOnToggleChange(id, isOn)</code></td>
+<td>Your toggle changed</td>
+<td>int, bool</td>
+</tr>
+<tr>
+<td><code>ShroudOnSceneLoaded(sceneName)</code> / <code>ShroudOnSceneUnloaded()</code></td>
+<td>Scene transitions</td>
+<td>string / —</td>
+</tr>
+<tr>
+<td><code>ShroudOnLogOut()</code></td>
+<td>At logout</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>ShroudOnPlaySound(clipName)</code></td>
+<td>A UI sound played</td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>ShroudOnPlayFX(fxName, on)</code></td>
+<td>An FX started/stopped</td>
+<td>string, bool</td>
+</tr>
+<tr>
+<td><code>ShroudOnPlayEmote(emote)</code></td>
+<td>You performed an emote via <code>ShroudPlayEmote</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>ShroudOnDisableScript()</code></td>
+<td>Your addon was turned off</td>
+<td>—</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>ShroudOnExperienceChanged</code> is accepted as an alias of <code>ShroudOnExperienceGain</code>.</p>
+<h3 id="declare-everything-local">Declare everything <code>local</code><a class="headerlink" href="#declare-everything-local" title="Link to this section">&para;</a></h3>
+<p>All enabled addons share one global environment. A top-level <code>function foo()</code> or a bare <code>x = 1</code>
+becomes a global that every other addon sees — and if two addons define a global with the same name,
+the last one loaded wins and quietly replaces the other's. <strong>Declare every helper and variable
+<code>local</code>.</strong> Only your <code>ShroudOn*</code> callbacks (and metadata fields the manager scrapes) need to be
+global-ish, and those are captured per addon at load time.</p>
+<pre><code class="language-lua">local state = {}                 -- good: private to this addon
+local function refresh() ... end -- good
+
+function ShroudOnUpdate()        -- callback: fine as a global
+    refresh()
+end
+</code></pre>
+<h2 id="reading-game-state">Reading game state<a class="headerlink" href="#reading-game-state" title="Link to this section">&para;</a></h2>
+<p>The API is read-mostly by design: you can read what your own UI already shows (your stats, your
+inventory, your party, your current target, whatever is under your cursor) and draw your own overlay,
+but there is no function to move, cast, target, loot, trade, or send chat. See the
+<a href="reference.html">API reference</a> for every read function.</p>
+<p>Per-frame values (player position, health, focus, gold, time, mouse) arrive as globals such as
+<code>ShroudPlayerCurrentHealth</code> and <code>ShroudMouseX</code>, refreshed each frame. Everything else is a function
+call — call these only inside a callback (they are not registered yet at file top level).</p>
+<h2 id="drawing-ui">Drawing UI<a class="headerlink" href="#drawing-ui" title="Link to this section">&para;</a></h2>
+<p>Two systems exist. Prefer the retained widget set (<code>ShroudUIText</code>, <code>ShroudUIImage</code>, <code>ShroudUIButton</code>,
+<code>ShroudUIPanel</code>, <code>ShroudUIInput</code>, <code>ShroudUIToggle</code> plus the <code>ShroudSet*</code> helpers): create objects once
+in <code>ShroudOnStart</code>, update them as needed. The legacy immediate-mode calls (<code>ShroudGUILabel</code>,
+<code>ShroudButton</code>, <code>ShroudDrawTexture</code>) run only inside <code>ShroudOnGUI</code> and will eventually be retired.</p>
+<h3 id="hover-tooltips-on-drawn-icons-api-v3">Hover tooltips on drawn icons (API v3)<a class="headerlink" href="#hover-tooltips-on-drawn-icons-api-v3" title="Link to this section">&para;</a></h3>
+<p>An immediate-mode icon can tell the player what it is. <code>ShroudDrawTextureTooltip(x, y, w, h, texId, text)</code>
+draws a texture and shows <code>text</code> when the cursor is over it; <code>ShroudGUITooltip(x, y, w, h, text)</code> attaches
+a tooltip to a region you drew yourself. Combined with the real buff icon and native-matching tooltip text
+(<code>ShroudGetBuffIcon(i)</code> / <code>ShroudGetBuffTooltip(i)</code>), a buff-icon addon can show recognizable icons that
+name their skill on hover:</p>
+<pre><code class="language-lua">function ShroudOnGUI()
+    for i = 0, ShroudGetBuffCount() - 1 do
+        local tex = ShroudGetBuffIcon(i)
+        if tex &gt;= 0 then
+            ShroudDrawTextureTooltip(40 + i * 44, 220, 40, 40, tex, ShroudGetBuffTooltip(i))
+        end
+    end
+end
+</code></pre>
+<p>The <a href="../examples/lua-addons/BuffIcons/">Buff Icons</a> reference addon is the full worked example.</p>
+<h2 id="saving-settings">Saving settings<a class="headerlink" href="#saving-settings" title="Link to this section">&para;</a></h2>
+<p>Use the saved-variables API (see the reference): <code>ShroudSetSavedVar(key, value)</code> /
+<code>ShroudGetSavedVar(key)</code> persist per-character (or per-account) JSON to
+<code>Lua/SavedVariables/&lt;addon&gt;.&lt;scope&gt;.json</code>, written at logout and on demand. This replaces writing your
+own files with <code>io.*</code> — which is now confined to the Lua folder (see below).</p>
+<h2 id="feature-detection">Feature detection<a class="headerlink" href="#feature-detection" title="Link to this section">&para;</a></h2>
+<p>New API is added behind a version number. Read <code>ShroudLuaApiVersion</code> (a plain global, safe at file top
+level) and gate accordingly:</p>
+<pre><code class="language-lua">local hasNewApi = ShroudLuaApiVersion and ShroudLuaApiVersion &gt;= 3
+</code></pre>
+<h2 id="the-sandbox">The sandbox<a class="headerlink" href="#the-sandbox" title="Link to this section">&para;</a></h2>
+<p>Addons run inside a sandbox:</p>
+<ul>
+<li><strong>File access is confined to the <code>Lua/</code> folder.</strong> <code>io.open</code>, <code>os.remove</code>, <code>os.rename</code>, and
+  <code>os.tmpname</code> all work, but only for paths inside <code>Lua/</code> (build them from the <code>ShroudLuaPath</code>
+  global). A path outside the folder raises a Lua error.</li>
+<li><strong><code>os.execute</code>, <code>os.exit</code>, and <code>os.getenv</code> are disabled.</strong> <code>os.execute</code> and <code>os.exit</code> raise a Lua
+  error; <code>os.getenv</code> returns nil.</li>
+<li><strong>A runaway addon is stopped.</strong> If a single callback runs too long (an accidental infinite loop), it
+  is aborted with an error rather than freezing the client. An addon that errors repeatedly in a short
+  window is automatically disabled — fix it and <code>/lua reload</code> to retry.</li>
+</ul>
+<p>Errors are reported in chat, prefixed with your addon's name.</p>
+<hr>
+<h2 id="migrating-an-existing-addon-phase-01-changes">Migrating an existing addon (Phase 0/1 changes)<a class="headerlink" href="#migrating-an-existing-addon-phase-01-changes" title="Link to this section">&para;</a></h2>
+<p>Most addons need no changes. The list below is everything that changed; search your scripts for the
+named functions.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>If your addon…</th>
+<th>What changed</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>calls <code>os.execute</code>, <code>os.exit</code>, or <code>os.getenv</code></td>
+<td>These now raise an error / return nil.</td>
+<td>Remove them. There is no supported replacement — they were never intended to be available.</td>
+</tr>
+<tr>
+<td>reads or writes files <strong>outside</strong> the <code>Lua/</code> folder with <code>io.*</code> / <code>os.remove</code> / <code>os.rename</code></td>
+<td>Now raises a Lua error.</td>
+<td>Move the file inside the <code>Lua/</code> folder; build paths from <code>ShroudLuaPath</code>. In-folder access is unchanged.</td>
+</tr>
+<tr>
+<td>saves its settings by writing a file</td>
+<td>Still works if the file is inside <code>Lua/</code>.</td>
+<td>Prefer the new <code>ShroudSetSavedVar</code>/<code>ShroudGetSavedVar</code> API.</td>
+</tr>
+<tr>
+<td>does heavy work in one callback</td>
+<td>A callback that runs too long is aborted.</td>
+<td>Spread work across frames, or use <code>ShroudRegisterPeriodic</code>. The budget is generous; only true hangs trip it.</td>
+</tr>
+<tr>
+<td>relies on being auto-enabled when dropped in</td>
+<td>New addons now load <strong>disabled</strong>.</td>
+<td>Enable it once in the addon manager after installing.</td>
+</tr>
+<tr>
+<td>defines <code>ShroudOnPlayEmote</code></td>
+<td>This callback now actually fires (it never used to).</td>
+<td>Confirm the handler does what you intend.</td>
+</tr>
+<tr>
+<td>throws errors every frame</td>
+<td>The addon is now auto-disabled after repeated errors.</td>
+<td>Fix the error; <code>/lua reload</code> to retry.</td>
+</tr>
+<tr>
+<td>used <code>/lua &lt;function&gt;</code> from chat and found it did nothing</td>
+<td><code>/lua &lt;func&gt; [args]</code> now correctly calls the named global; <code>/lua code &lt;lua&gt;</code> runs a snippet. Only globals from <strong>enabled</strong> addons are reachable — a disabled addon contributes nothing to call.</td>
+<td>Enable the addon in the manager first if you drive it through <code>/lua &lt;func&gt;</code>.</td>
+</tr>
+<tr>
+<td>defined a top-level global helper that collided with another addon</td>
+<td>Unchanged behavior, but worth fixing.</td>
+<td>Make your helpers <code>local</code> (see above).</td>
+</tr>
+</tbody>
+</table></div>
+<p>Everything else — the entire <code>Shroud*</code> read/UI/sound/periodic surface — keeps identical names,
+signatures, and return values, including long-standing quirks (0-based widget ids vs 1-based sound
+ids, the <code>ShroudSetDragguable</code> spelling, <code>ShroudGetGameTime</code> day/month being engine value +1,
+<code>ShroudSetParent</code> returning -1). Those are frozen for compatibility and documented in the
+<a href="reference.html">API reference</a>.</p>
+<hr>
+<h2 id="sharing-addons-the-community-addons-window">Sharing addons: the Community Addons window<a class="headerlink" href="#sharing-addons-the-community-addons-window" title="Link to this section">&para;</a></h2>
+<p>You can share an addon with other players through the in-game <strong>Community Addons</strong> window (open
+it with the <code>/addons</code> chat command, or the <strong>Get Addons</strong> button in the addon manager). The window
+lists addons other players have submitted and an admin has approved. Each entry shows the author, a
+short description, how many players have it installed, and when it was last updated.</p>
+<ul>
+<li><strong>Install / Update / Remove</strong> download an approved addon into its own folder and, for updates,
+  replace it in place. An installed addon starts <strong>disabled</strong>, the same as a file you drop in
+  yourself — enable it in the manager (or with the window's <strong>Run</strong> toggle) once you have looked at
+  what it does.</li>
+<li>Removing an addon deletes its folder but <strong>keeps its saved variables</strong>, so reinstalling later
+  keeps your settings.</li>
+<li>Every version is read by an automated reviewer and then approved by a human before it appears in
+  the list. The reviewer writes the one-paragraph description you see on each entry.</li>
+</ul>
+<h3 id="packages-vs-flat-files">Packages vs. flat files<a class="headerlink" href="#packages-vs-flat-files" title="Link to this section">&para;</a></h3>
+<p>A shared addon is a <strong>package</strong>: a small zip containing a <code>manifest.json</code>, one or more <code>*.lua</code>
+files, and an optional <code>icon.png</code> and <code>README.md</code>. It installs into its own subfolder,
+<code>Lua/&lt;slug&gt;/</code>, instead of sitting loose in <code>Lua/</code>. The <code>&lt;slug&gt;</code> is a short lowercase id (letters,
+digits, hyphens) that uniquely names the addon in the store.</p>
+<p>Your <strong>hand-installed flat <code>*.lua</code> files keep working exactly as before</strong> — the loader reads both
+loose files in <code>Lua/</code> and one level of <code>Lua/&lt;slug&gt;/</code> package folders. Inside a package, all the
+<code>.lua</code> files listed in the manifest run in the order listed and share one global environment (the
+same as putting several <code>function</code> definitions in one file); <code>require()</code> between package files is
+not supported.</p>
+<p>The <code>manifest.json</code> for a package looks like this (the store builds it for you when you submit, so
+you rarely write it by hand):</p>
+<pre><code class="language-json">{
+  &quot;manifest_version&quot;: 1,
+  &quot;slug&quot;: &quot;loot-tracker&quot;,
+  &quot;name&quot;: &quot;Loot Tracker&quot;,
+  &quot;version&quot;: &quot;1.2.0&quot;,
+  &quot;description&quot;: &quot;Shows a running total of loot picked up this session.&quot;,
+  &quot;author&quot;: &quot;YourName&quot;,
+  &quot;files&quot;: [&quot;main.lua&quot;],
+  &quot;icon&quot;: &quot;icon.png&quot;,
+  &quot;min_api_version&quot;: 2,
+  &quot;permissions&quot;: []
+}
+</code></pre>
+<p><code>version</code> is three numbers (<code>N.N.N</code>) and must go <strong>up</strong> every time you submit an update.
+<code>permissions</code> is reserved for future capability grants and must be empty today. <code>min_api_version</code>
+is the lowest <code>ShroudLuaApiVersion</code> your addon needs; a player on an older build can install it but
+cannot enable it until they update.</p>
+<h2 id="submitting-your-own-addon">Submitting your own addon<a class="headerlink" href="#submitting-your-own-addon" title="Link to this section">&para;</a></h2>
+<p>From the Community Addons window, pick your addon under <strong>Your local addons</strong> (for a single-file
+addon) or select an installed package, and choose <strong>Submit to Community</strong>. The game bundles your
+<code>.lua</code> file (plus its icon, if you set <code>IconPath</code>) into a package, generates the manifest, and
+uploads it — you do not build the zip yourself.</p>
+<ul>
+<li>You sign in with your <strong>game account</strong> (the same login you use to play); the password is used
+  only to authorize the upload and is never stored.</li>
+<li>On the first submission you pick the <strong>slug</strong> and starting version. For an update, the slug is
+  fixed and you supply a higher version and a short changelog.</li>
+<li>After you submit, the addon is scanned and waits for an admin to approve it. Track its state in
+  the window's <strong>My Submissions</strong> tab: <em>Scanning</em>, <em>Waiting for review</em>, <em>Approved</em>, or <em>Rejected</em>
+  (with the reviewer's note).</li>
+</ul>
+<p>The reviewer reads your code to write the player-facing description and to check for anything
+misleading or unsafe. The client sandbox (below) is still the real safety boundary — review is an
+extra check and a way to keep the catalog readable, not a replacement for it.</p>
+<h3 id="from-a-flat-addon-to-a-package">From a flat addon to a package<a class="headerlink" href="#from-a-flat-addon-to-a-package" title="Link to this section">&para;</a></h3>
+<p>If you previously shared a flat <code>MyAddon.lua</code> by hand and now submit it as package <code>myaddon</code>, the
+packaged copy is a <strong>new addon identity</strong>: it starts disabled and with empty saved variables (the
+game keys enable-state and saved variables on the package, not the old filename). Players re-enable
+it once. If you want to carry a player's old settings across, ship one-time import code that reads
+the old <code>Lua/SavedVariables/MyAddon.*.json</code> through the confined <code>io</code> API and copies the values in
+with <code>ShroudSetSavedVar</code>. The store never deletes or renames a player's loose files; if a package
+would collide with a loose file of the same name, the game asks the player before moving the loose
+file aside.</p>
+  </div></main>
+</div>
+<footer class="site-footer">Shroud of the Avatar &middot; community Lua addon documentation. Generated from the client bindings. <a href="index.html">Docs home</a> &middot; <a href="https://addons.catnipgames.net" target="_blank" rel="noopener">Addon store</a></footer>
+<script>window.__SEARCH_INDEX=[{"t": "Declare everything local", "id": "declare-everything-local"}, {"t": "Hover tooltips on drawn icons (API v3)", "id": "hover-tooltips-on-drawn-icons-api-v3"}, {"t": "Packages vs. flat files", "id": "packages-vs-flat-files"}, {"t": "From a flat addon to a package", "id": "from-a-flat-addon-to-a-package"}, {"t": "Installing and enabling an addon", "id": "installing-and-enabling-an-addon"}, {"t": "Addon metadata", "id": "addon-metadata"}, {"t": "The addon lifecycle and callbacks", "id": "the-addon-lifecycle-and-callbacks"}, {"t": "Reading game state", "id": "reading-game-state"}, {"t": "Drawing UI", "id": "drawing-ui"}, {"t": "Saving settings", "id": "saving-settings"}, {"t": "Feature detection", "id": "feature-detection"}, {"t": "The sandbox", "id": "the-sandbox"}, {"t": "Migrating an existing addon (Phase 0/1 changes)", "id": "migrating-an-existing-addon-phase-01-changes"}, {"t": "Sharing addons: the Community Addons window", "id": "sharing-addons-the-community-addons-window"}, {"t": "Submitting your own addon", "id": "submitting-your-own-addon"}];</script>
+<script src="docs.js"></script>
+</body>
+</html>

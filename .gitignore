@@ -1,0 +1,8 @@
+# Built addon bundles; regenerate with ./run.sh build
+/dist/
+
+# Locally fetched Lua interpreter; regenerate with ./run.sh setup
+/.tooling/
+
+# Per-machine settings, chiefly the path to the game's Lua folder
+/.sotalua.local

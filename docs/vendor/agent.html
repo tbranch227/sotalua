@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent reference &middot; SotA Lua Addons</title>
+<meta name="robots" content="index,follow">
+<meta name="description" content="Documentation for writing Lua addons for Shroud of the Avatar.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html" style="text-decoration:none">
+    <span class="crest">SotA</span><span class="title">Lua <b>Addons</b></span>
+  </a>
+  <button class="menu-toggle" aria-label="Toggle navigation">&#9776;</button>
+  <nav class="topnav">
+    <a href="index.html">Home</a>
+    <a href="guide.html">Guide</a>
+    <a href="reference.html">API Reference</a>
+    <a href="internals.html">Host internals</a>
+    <a href="agent.html" class="active">Agent reference</a>
+    <a href="https://addons.catnipgames.net" target="_blank" rel="noopener">Addon store &#8599;</a>
+  </nav>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <input type="text" class="side-search" id="side-search" placeholder="Filter 15 entries..." autocomplete="off">
+  <div id="search-results"></div>
+  <div class="side-title">On this page</div>
+  <nav id="side-nav">
+<a href="#model">Model</a>
+<a href="#callbacks-define-as-globals-host-looks-up-by-exact-name">Callbacks (define as globals; host looks up by exact name)</a>
+<a href="#per-frame-globals-constants">Per-frame globals / constants</a>
+<a href="#character-stats-xp">Character / stats / xp</a>
+<a href="#buffs-player-flat-index-space-shroudgetbuffcount">Buffs — player (flat index space = ShroudGetBuffCount)</a>
+<a href="#buffs-target-746-flat-shroudgettargetbuffcount">Buffs — target (#746; flat = ShroudGetTargetBuffCount)</a>
+<a href="#under-mouse-1031-pet-party-scene-inventory">Under-mouse (#1031) · pet · party · scene · inventory</a>
+<a href="#immediate-mode-gui-only-inside-shroudongui-re-issue-every-frame-origin-top-left">Immediate-mode GUI (only inside ShroudOnGUI; re-issue every frame; origin top-left)</a>
+<a href="#retained-widgets-create-in-onstart-shrouduiid-then-shroudsetshroudget-by-idkind">Retained widgets (create in OnStart; ShroudUI*→id, then ShroudSet*/ShroudGet* by (id,kind))</a>
+<a href="#textures-sound-input-timers-console">Textures / sound / input / timers / console</a>
+<a href="#saved-variables-json-at-luasavedvariablesaddonscopejson-written-at-logouton-demand">Saved variables (JSON at Lua/SavedVariables/&amp;lt;addon&amp;gt;.&amp;lt;scope&amp;gt;.json; written at logout/on demand)</a>
+<a href="#data-shapes">Data shapes</a>
+<a href="#packaging-community-addon-store-loads-from-luaslug">Packaging (community addon store; loads from Lua/&amp;lt;slug&amp;gt;/)</a>
+<a href="#sandbox">Sandbox</a>
+<a href="#adding-a-new-binding-agent-recipe">Adding a new binding (agent recipe)</a>
+  </nav>
+</aside>
+  <main class="content"><div class="prose">
+<h1 id="lua-addon-api-agent-reference">Lua addon API — agent reference<a class="headerlink" href="#lua-addon-api-agent-reference" title="Link to this section">&para;</a></h1>
+<p>Token-dense map of the SotA <code>Shroud*</code> Lua addon API for AI coding agents. Human reference:
+<a href="reference.html">lua-addon-api.md</a>; authoring: <a href="guide.html">lua-addon-guide.md</a>; host
+internals: <a href="internals.html">lua-addons.md</a>. Bindings live in
+<code>UnityProject/Assets/Scripts/Lua/LuaManager.cs</code> (client-only; NOT under <code>Shared/</code>, no mirror sync).</p>
+<h2 id="model">Model<a class="headerlink" href="#model" title="Link to this section">&para;</a></h2>
+<ul>
+<li>MoonSharp interpreter. Host registers globals <code>m_bootScript.Globals["ShroudX"] = (Func&lt;...&gt;)Lua_X</code>
+  in <code>InitAPICalls*</code> (LuaManager.cs ~1101+). API valid only inside callbacks (registered after addon
+  files load). <code>ShroudLuaApiVersion</code> = <strong>3</strong> (plain global, readable at file top level).</li>
+<li>Indices <strong>0-based</strong> (except sound clip/channel: 1-based, see note). Sentinels: number→<code>-999</code>
+  (<code>InvalidStatResult</code>), name→<code>"INVALID"</code>/<code>"None"</code>/<code>"Invalid"</code>, object/list→<code>nil</code>, seconds→<code>-1</code>,
+  texture id→<code>-1</code>.</li>
+<li>Types below in Lua terms: number, string, boolean, table, list, any(DynValue), nil. <code>UI</code> params
+  are a widget-kind number. Retained widgets return an int id; <code>ShroudSet*</code>/<code>ShroudGet*</code> take
+  <code>(id, kind, ...)</code>.</li>
+</ul>
+<h2 id="callbacks-define-as-globals-host-looks-up-by-exact-name">Callbacks (define as globals; host looks up by exact name)<a class="headerlink" href="#callbacks-define-as-globals-host-looks-up-by-exact-name" title="Link to this section">&para;</a></h2>
+<p><code>ShroudOnStart()</code> load+enable · <code>ShroudOnUpdate()</code> per frame · <code>ShroudOnGUI()</code> IMGUI pass (only place
+immediate-mode draws are valid; runs multiple times/frame) · <code>ShroudOnConsoleInput(type,src,msg)</code> ·
+<code>ShroudOnExperienceGain(kind,amt)</code> (alias <code>ShroudOnExperienceChanged</code>) ·
+<code>ShroudOnMouseOver/Out/Click(id,kind)</code> (retained widgets w/ listener) · <code>ShroudOnInputChange(id,text)</code>
+· <code>ShroudOnToggleChange(id,isOn)</code> · <code>ShroudOnSceneLoaded(scene)</code> · <code>ShroudOnSceneUnloaded()</code> ·
+<code>ShroudOnLogOut()</code> · <code>ShroudOnPlaySound(clip)</code> · <code>ShroudOnPlayFX(fx,on)</code> · <code>ShroudOnPlayEmote(emote)</code>
+· <code>ShroudOnDisableScript()</code>. Each caught per-call; a throw doesn't stop other addons. Disabled addons
+don't run (and <code>/lua &lt;func&gt;</code> only reaches enabled ones).</p>
+<h2 id="per-frame-globals-constants">Per-frame globals / constants<a class="headerlink" href="#per-frame-globals-constants" title="Link to this section">&para;</a></h2>
+<p><code>ShroudTime</code>,<code>ShroudDeltaTime</code>,<code>ShroudMouseX</code>,<code>ShroudMouseY</code> (GUI-space: top-left origin),
+player <code>ShroudPosition*</code>/health/focus/gold snapshots, <code>ShroudServerTime</code>, <code>ShroudLuaApiVersion</code>,
+<code>InvalidStatResult</code>(-999). (Pushed each frame; cached against NaN sentinels.)</p>
+<h2 id="character-stats-xp">Character / stats / xp<a class="headerlink" href="#character-stats-xp" title="Link to this section">&para;</a></h2>
+<p><code>ShroudGetPlayerName()→s</code> · <code>ShroudGetPlayerCombatMode()→b</code> · <code>ShroudGetPlayerOrientation()→n</code> ·
+<code>ShroudGetStatCount()→n</code> · <code>ShroudGetStatValueByNumber(i)→n</code> · <code>ShroudGetStatValueByName(name)→n</code> ·
+<code>ShroudGetStatNameByNumber(i)→s</code> · <code>ShroudGetStatDescriptionByNumber(i)→s</code> ·
+<code>ShroudGet{Pooled,Total}{Adventurer,Producer}Experience()→n</code> ·
+<code>ShroudGetAttenuation{Adventurer,Producer}Status()→b</code>.</p>
+<h2 id="buffs-player-flat-index-space-shroudgetbuffcount">Buffs — player (flat index space = <code>ShroudGetBuffCount</code>)<a class="headerlink" href="#buffs-player-flat-index-space-shroudgetbuffcount" title="Link to this section">&para;</a></h2>
+<p><code>ShroudGetBuffCount()→n</code> (raw effect entries) · <code>ShroudGetBuffName(i)→s</code> (rune name) ·
+<code>ShroudGetBuffDescription(i)→s</code> (localized label) · <code>ShroudGetBuffTimeRemaining(i)→n</code> (secs, -1) ·
+<strong><code>ShroudGetBuffIcon(i)→n</code></strong> real skill-icon texture id (use w/ <code>ShroudDrawTexture*</code>; -1 if none;
+cached per skill) <em>(v3)</em> · <strong><code>ShroudGetBuffTooltip(i)→s</code></strong> native-matching plain text (skill name +
+effect line + time; markup stripped) <em>(v3)</em> · <code>ShroudGetPlayerBuff()→list</code> grouped-by-rune (see
+RuneEffects) · <code>ShroudGetPetBuff()→list</code>.</p>
+<h2 id="buffs-target-746-flat-shroudgettargetbuffcount">Buffs — target (<code>#746</code>; flat = <code>ShroudGetTargetBuffCount</code>)<a class="headerlink" href="#buffs-target-746-flat-shroudgettargetbuffcount" title="Link to this section">&para;</a></h2>
+<p><code>ShroudHasTarget()→b</code> · <code>ShroudGetTargetName/Id()</code> · <code>ShroudIsTargetDead()</code> ·
+<code>ShroudIsTargetHealthHidden()</code> · <code>ShroudGetTargetCurrent/MaxHealth()</code>,<code>.../Focus()</code> ·
+<code>ShroudGetTargetBuff()→list</code> · <code>ShroudGetTargetBuffCount()</code> ·
+<code>ShroudGetTargetBuff{Name,Description,TimeRemaining}(i)</code> ·
+<strong><code>ShroudGetTargetBuffIcon(i)→n</code></strong> / <strong><code>ShroudGetTargetBuffTooltip(i)→s</code></strong> <em>(v3)</em> ·
+<code>ShroudGetTargetStatValueBy{Number,Name}</code>.</p>
+<h2 id="under-mouse-1031-pet-party-scene-inventory">Under-mouse (<code>#1031</code>) · pet · party · scene · inventory<a class="headerlink" href="#under-mouse-1031-pet-party-scene-inventory" title="Link to this section">&para;</a></h2>
+<p><code>ShroudGet{Name,Description,Kind,Id}UnderMouse()</code> (world-then-UI; plain text) ·
+<code>ShroudGetPetInfo()→table</code> · <code>ShroudGetPartyMemberCount[InScene]()</code>,
+<code>ShroudGetPartyMember{Name,CurrentHealth,MaxHealth,CurrentFocus,MaxFocus}[InScene](i|name)</code> ·
+<code>ShroudGetCurrentSceneName[Raw]()</code>,<code>...Orientation/MaxPlayerCount/IsPVP/IsPOT()</code>,
+<code>ShroudGetCurrentDungeonName/Owner()</code>,<code>ShroudGetSceneCap()</code>,<code>ShroudGetGameTime()</code>,
+<code>ShroudWorldToScreenPoint(x,y,z)→vec3</code> · <code>ShroudGetInventory()→list</code>,<code>ShroudGetEquipments()→list</code>,
+decks <code>ShroudCurrentDeck/DeckList/GetDeckCardList/SwitchDeck</code>, emotes <code>ShroudEmoteList/PlayEmote</code>,
+<code>ShroudStopFX</code>.</p>
+<h2 id="immediate-mode-gui-only-inside-shroudongui-re-issue-every-frame-origin-top-left">Immediate-mode GUI (only inside <code>ShroudOnGUI</code>; re-issue every frame; origin top-left)<a class="headerlink" href="#immediate-mode-gui-only-inside-shroudongui-re-issue-every-frame-origin-top-left" title="Link to this section">&para;</a></h2>
+<p>GOTCHA: <code>lrx/lry</code> params are Rect <strong>width/height</strong>, not lower-right. Texture funcs need a valid id or
+return false (draw nothing).
+<code>ShroudGUILabel(x,y,w,h,text)</code> · <code>ShroudButton(x,y,w,h,texId,text,tooltip)→b</code> (fires on click) ·
+<code>ShroudButtonRepeat(...)</code> (fires while held) · <code>ShroudDrawTexture(x,y,w,h,texId)→b</code> ·
+<strong><code>ShroudDrawTextureTooltip(x,y,w,h,texId,text)→b</code></strong> draw + register hover region <em>(v3)</em> ·
+<strong><code>ShroudGUITooltip(x,y,w,h,text)→b</code></strong> register hover region only <em>(v3)</em>. Host draws the topmost
+hovered region's tooltip after all addons' OnGUI (last-drawn-under-cursor wins); registration lasts
+one GUI pass.</p>
+<h2 id="retained-widgets-create-in-onstart-shrouduiid-then-shroudsetshroudget-by-idkind">Retained widgets (create in OnStart; <code>ShroudUI*</code>→id, then <code>ShroudSet*</code>/<code>ShroudGet*</code> by (id,kind))<a class="headerlink" href="#retained-widgets-create-in-onstart-shrouduiid-then-shroudsetshroudget-by-idkind" title="Link to this section">&para;</a></h2>
+<p>Create: <code>ShroudUIText(text,...)</code>,<code>ShroudUIImage</code>,<code>ShroudUIButton</code>,<code>ShroudUIPanel</code>,<code>ShroudUIInput</code>,
+<code>ShroudUIToggle</code>. Transform: <code>ShroudSet{Position,Size,Scale,Pivot,AnchorMin,AnchorMax,Transparency,
+Color,Rotation}</code>,<code>ShroudGetPosition</code>,<code>ShroudMinMaxSize</code>,<code>ShroudSetResizable/Dragguable/Mask</code>. Parent:
+<code>ShroudSet{Text,Image,Button,Panel}Parent</code>,<code>ShroudSetParent</code>,<code>ShroudGetParentID/ObjectKind</code>.
+Visibility: <code>ShroudShow/HideObject</code>,<code>ShroudShow/HideLuaUI</code>,<code>ShroudDestroyObject</code>,<code>ShroudIsUIActive</code>.
+Content: <code>ShroudModifyText/Image</code>,<code>ShroudSetFontSize/TextAlignment</code>. Input: <code>ShroudSet/GetInputText</code>,
+<code>ShroudSetInput{CharacterLimit,ContentType,Readonly,BackgroundColor,PlaceholderText}</code>,
+<code>ShroudGetInputText(id)</code>. Toggle: <code>ShroudSet/GetToggle</code>,<code>ShroudSetToggleReadonly</code>. Button style:
+<code>ShroudSetButton{Color,Image,Transition}</code>. Listeners: <code>ShroudSet/UnsetClickListener</code>,
+<code>ShroudSet/UnsetInOutListener</code> (drive OnMouseOver/Out/Click), <code>ShroudRaycastObject</code>.</p>
+<h2 id="textures-sound-input-timers-console">Textures / sound / input / timers / console<a class="headerlink" href="#textures-sound-input-timers-console" title="Link to this section">&para;</a></h2>
+<p><code>ShroudLoadTexture(path)→id</code> (confined to addon folder; <code>..</code> escape→-1) ·
+<code>ShroudGetTextureSize(id)→(w,h)</code> · <code>ShroudSetTextureClamp(id,bool)</code>. Sound: <code>ShroudLoadSound</code> (async;
+appears in <code>ShroudListSound()</code> after load), <code>ShroudPlaySound(clip1based,...)</code> <strong>returns 0-based
+channel</strong> — add 1 before <code>ShroudStopSound</code>/<code>ShroudIsChannelPlaying</code> (1-based), <code>ShroudStopUISound</code>,
+<code>ShroudSceneMusic</code>. Input: <code>ShroudGetKeyDown/OnKeyDown/OnKeyUp(keyName)</code> — <code>keyName</code> is a Unity
+<code>KeyCode</code> enum name (e.g. <code>"LeftAlt"</code>,<code>"F1"</code>). Timers: <code>ShroudRegisterPeriodic(name,fn,secs,repeat)</code>,
+<code>ShroudRemovePeriodic</code>,<code>ShroudListPeriodics</code>. <code>ShroudConsoleLog(s)</code>,<code>ShroudUseLuaConsoleForPrint(b)</code>,
+<code>ShroudForceGC</code>.</p>
+<h2 id="saved-variables-json-at-luasavedvariablesaddonscopejson-written-at-logouton-demand">Saved variables (JSON at <code>Lua/SavedVariables/&lt;addon&gt;.&lt;scope&gt;.json</code>; written at logout/on demand)<a class="headerlink" href="#saved-variables-json-at-luasavedvariablesaddonscopejson-written-at-logouton-demand" title="Link to this section">&para;</a></h2>
+<p><code>ShroudSetSavedVar(key,value,scope)→b</code> (value: string|number|boolean|table|nil), <code>ShroudGetSavedVar
+(key,scope)→any</code>, <code>ShroudDeleteSavedVar(key,scope)</code>, <code>ShroudFlushSavedVars()</code>. <code>scope</code> = <code>"character"</code>
+(default) | <code>"account"</code>. Replaces <code>io.*</code> file writing.</p>
+<h2 id="data-shapes">Data shapes<a class="headerlink" href="#data-shapes" title="Link to this section">&para;</a></h2>
+<ul>
+<li><code>RuneEffects</code> (from <code>ShroudGetPlayerBuff</code>/<code>GetPetBuff</code>/<code>GetTargetBuff</code>): <code>RuneName</code> s, <code>RuneId</code> n,
+  <code>IsDebuff</code> b, <code>IconId</code> n (real skill icon texture id, -1; = <code>ShroudGetBuffIcon</code>) <em>(v3)</em>,
+  <code>StackCount</code> n (grouped effect count, upper bound on stacks), <code>Effects</code> list of
+  <code>{ Description(stat-type string), Value, CurrentDuration, TotalDuration, TotalTick }</code>.
+  NOTE grouped-by-rune → shorter than <code>ShroudGetBuffCount</code> (flat).</li>
+<li><code>GameTime</code>,<code>SceneCap</code>,<code>PetInfo</code>,<code>Deck</code>,<code>LuaVector2/3</code> — see human reference.</li>
+</ul>
+<h2 id="packaging-community-addon-store-loads-from-luaslug">Packaging (community addon store; loads from <code>Lua/&lt;slug&gt;/</code>)<a class="headerlink" href="#packaging-community-addon-store-loads-from-luaslug" title="Link to this section">&para;</a></h2>
+<p><code>manifest.json</code>: <code>manifest_version</code>(1), <code>slug</code>(3-40 <code>^[a-z][a-z0-9]*(-[a-z0-9]+)*$</code>, not reserved),
+<code>name</code>(3-60), <code>version</code>(<code>N.N.N</code>, 0-9999 each, no leading zero), <code>files</code>(1-16 <code>*.lua</code>, load=exec
+order, unique stems), optional <code>description</code>/<code>author</code>/<code>readme</code>/<code>icon</code>(=<code>"icon.png"</code>),
+<code>min_api_version</code>(int; loader refuses to ENABLE if client older, still parses), <code>permissions</code>(must be
+empty). Ref example: <code>docs/examples/lua-addons/BuffIcons/</code>. Loader/validation:
+<code>LuaPackage{Manifest,Discovery,Installer,ZipPolicy}.cs</code>, <code>LuaSandboxPolicy</code>.</p>
+<h2 id="sandbox">Sandbox<a class="headerlink" href="#sandbox" title="Link to this section">&para;</a></h2>
+<p><code>io.*</code>/<code>os.remove|rename</code> confined to <code>Lua/</code>. No arbitrary FS/network. Execution watchdog + error
+isolation per addon. Pure text/logic helpers live beside the manager and are EditMode-tested:
+<code>LuaMouseLogic.cs</code>, <code>LuaBuffLogic.cs</code>, <code>LuaSavedVarsLogic.cs</code>, <code>LuaTargetLogic.cs</code>.</p>
+<h2 id="adding-a-new-binding-agent-recipe">Adding a new binding (agent recipe)<a class="headerlink" href="#adding-a-new-binding-agent-recipe" title="Link to this section">&para;</a></h2>
+<ol>
+<li><code>Lua_X(...)</code> method in <code>LuaManager.cs</code> (read game state; return sentinel on missing state).</li>
+<li>Register in the matching <code>InitAPI*</code> block: <code>m_bootScript.Globals["ShroudX"] =
+   (System.Func&lt;...&gt;)Lua_X;</code> (target-frame funcs go near the Target region).</li>
+<li>New type returned to Lua → <code>UserData.RegisterType&lt;T&gt;()</code> in the registration block near line ~373.</li>
+<li>Bump <code>kLuaApiVersion</code> + comment; extend the human reference (<code>lua-addon-api.md</code>) AND this file.</li>
+<li>Pure logic → factor into a <code>Lua*Logic.cs</code> sibling and add <code>PortedTests/</code> EditMode tests.</li>
+<li>Client-only; no <code>Shared/</code> mirror, no net10 csproj concerns.</li>
+</ol>
+  </div></main>
+</div>
+<footer class="site-footer">Shroud of the Avatar &middot; community Lua addon documentation. Generated from the client bindings. <a href="index.html">Docs home</a> &middot; <a href="https://addons.catnipgames.net" target="_blank" rel="noopener">Addon store</a></footer>
+<script>window.__SEARCH_INDEX=[{"t": "Model", "id": "model"}, {"t": "Callbacks (define as globals; host looks up by exact name)", "id": "callbacks-define-as-globals-host-looks-up-by-exact-name"}, {"t": "Per-frame globals / constants", "id": "per-frame-globals-constants"}, {"t": "Character / stats / xp", "id": "character-stats-xp"}, {"t": "Buffs — player (flat index space = ShroudGetBuffCount)", "id": "buffs-player-flat-index-space-shroudgetbuffcount"}, {"t": "Buffs — target (#746; flat = ShroudGetTargetBuffCount)", "id": "buffs-target-746-flat-shroudgettargetbuffcount"}, {"t": "Under-mouse (#1031) · pet · party · scene · inventory", "id": "under-mouse-1031-pet-party-scene-inventory"}, {"t": "Immediate-mode GUI (only inside ShroudOnGUI; re-issue every frame; origin top-left)", "id": "immediate-mode-gui-only-inside-shroudongui-re-issue-every-frame-origin-top-left"}, {"t": "Retained widgets (create in OnStart; ShroudUI*→id, then ShroudSet*/ShroudGet* by (id,kind))", "id": "retained-widgets-create-in-onstart-shrouduiid-then-shroudsetshroudget-by-idkind"}, {"t": "Textures / sound / input / timers / console", "id": "textures-sound-input-timers-console"}, {"t": "Saved variables (JSON at Lua/SavedVariables/&lt;addon&gt;.&lt;scope&gt;.json; written at logout/on demand)", "id": "saved-variables-json-at-luasavedvariablesaddonscopejson-written-at-logouton-demand"}, {"t": "Data shapes", "id": "data-shapes"}, {"t": "Packaging (community addon store; loads from Lua/&lt;slug&gt;/)", "id": "packaging-community-addon-store-loads-from-luaslug"}, {"t": "Sandbox", "id": "sandbox"}, {"t": "Adding a new binding (agent recipe)", "id": "adding-a-new-binding-agent-recipe"}];</script>
+<script src="docs.js"></script>
+</body>
+</html>

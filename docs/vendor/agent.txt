@@ -1,0 +1,188 @@
+Agent reference · SotA Lua Addons
+
+    SotALua Addons
+
+  ☰
+
+    Home
+    Guide
+    API Reference
+    Host internals
+    Agent reference
+    Addon store ↗
+
+  On this page
+
+Model
+Callbacks (define as globals; host looks up by exact name)
+Per-frame globals / constants
+Character / stats / xp
+Buffs — player (flat index space = ShroudGetBuffCount)
+Buffs — target (#746; flat = ShroudGetTargetBuffCount)
+Under-mouse (#1031) · pet · party · scene · inventory
+Immediate-mode GUI (only inside ShroudOnGUI; re-issue every frame; origin top-left)
+Retained widgets (create in OnStart; ShroudUI*→id, then ShroudSet*/ShroudGet* by (id,kind))
+Textures / sound / input / timers / console
+Saved variables (JSON at Lua/SavedVariables/&lt;addon&gt;.&lt;scope&gt;.json; written at logout/on demand)
+Data shapes
+Packaging (community addon store; loads from Lua/&lt;slug&gt;/)
+Sandbox
+Adding a new binding (agent recipe)
+
+Lua addon API — agent reference¶
+
+Token-dense map of the SotA Shroud* Lua addon API for AI coding agents. Human reference:
+lua-addon-api.md; authoring: lua-addon-guide.md; host
+internals: lua-addons.md. Bindings live in
+UnityProject/Assets/Scripts/Lua/LuaManager.cs (client-only; NOT under Shared/, no mirror sync).
+
+Model¶
+
+MoonSharp interpreter. Host registers globals m_bootScript.Globals["ShroudX"] = (Func<...>)Lua_X
+  in InitAPICalls* (LuaManager.cs ~1101+). API valid only inside callbacks (registered after addon
+  files load). ShroudLuaApiVersion = 3 (plain global, readable at file top level).
+
+Indices 0-based (except sound clip/channel: 1-based, see note). Sentinels: number→-999
+  (InvalidStatResult), name→"INVALID"/"None"/"Invalid", object/list→nil, seconds→-1,
+  texture id→-1.
+
+Types below in Lua terms: number, string, boolean, table, list, any(DynValue), nil. UI params
+  are a widget-kind number. Retained widgets return an int id; ShroudSet*/ShroudGet* take
+  (id, kind, ...).
+
+Callbacks (define as globals; host looks up by exact name)¶
+
+ShroudOnStart() load+enable · ShroudOnUpdate() per frame · ShroudOnGUI() IMGUI pass (only place
+immediate-mode draws are valid; runs multiple times/frame) · ShroudOnConsoleInput(type,src,msg) ·
+ShroudOnExperienceGain(kind,amt) (alias ShroudOnExperienceChanged) ·
+ShroudOnMouseOver/Out/Click(id,kind) (retained widgets w/ listener) · ShroudOnInputChange(id,text)
+· ShroudOnToggleChange(id,isOn) · ShroudOnSceneLoaded(scene) · ShroudOnSceneUnloaded() ·
+ShroudOnLogOut() · ShroudOnPlaySound(clip) · ShroudOnPlayFX(fx,on) · ShroudOnPlayEmote(emote)
+· ShroudOnDisableScript(). Each caught per-call; a throw doesn't stop other addons. Disabled addons
+don't run (and /lua <func> only reaches enabled ones).
+
+Per-frame globals / constants¶
+
+ShroudTime,ShroudDeltaTime,ShroudMouseX,ShroudMouseY (GUI-space: top-left origin),
+player ShroudPosition*/health/focus/gold snapshots, ShroudServerTime, ShroudLuaApiVersion,
+InvalidStatResult(-999). (Pushed each frame; cached against NaN sentinels.)
+
+Character / stats / xp¶
+
+ShroudGetPlayerName()→s · ShroudGetPlayerCombatMode()→b · ShroudGetPlayerOrientation()→n ·
+ShroudGetStatCount()→n · ShroudGetStatValueByNumber(i)→n · ShroudGetStatValueByName(name)→n ·
+ShroudGetStatNameByNumber(i)→s · ShroudGetStatDescriptionByNumber(i)→s ·
+ShroudGet{Pooled,Total}{Adventurer,Producer}Experience()→n ·
+ShroudGetAttenuation{Adventurer,Producer}Status()→b.
+
+Buffs — player (flat index space = ShroudGetBuffCount)¶
+
+ShroudGetBuffCount()→n (raw effect entries) · ShroudGetBuffName(i)→s (rune name) ·
+ShroudGetBuffDescription(i)→s (localized label) · ShroudGetBuffTimeRemaining(i)→n (secs, -1) ·
+ShroudGetBuffIcon(i)→n real skill-icon texture id (use w/ ShroudDrawTexture*; -1 if none;
+cached per skill) (v3) · ShroudGetBuffTooltip(i)→s native-matching plain text (skill name +
+effect line + time; markup stripped) (v3) · ShroudGetPlayerBuff()→list grouped-by-rune (see
+RuneEffects) · ShroudGetPetBuff()→list.
+
+Buffs — target (#746; flat = ShroudGetTargetBuffCount)¶
+
+ShroudHasTarget()→b · ShroudGetTargetName/Id() · ShroudIsTargetDead() ·
+ShroudIsTargetHealthHidden() · ShroudGetTargetCurrent/MaxHealth(),.../Focus() ·
+ShroudGetTargetBuff()→list · ShroudGetTargetBuffCount() ·
+ShroudGetTargetBuff{Name,Description,TimeRemaining}(i) ·
+ShroudGetTargetBuffIcon(i)→n / ShroudGetTargetBuffTooltip(i)→s (v3) ·
+ShroudGetTargetStatValueBy{Number,Name}.
+
+Under-mouse (#1031) · pet · party · scene · inventory¶
+
+ShroudGet{Name,Description,Kind,Id}UnderMouse() (world-then-UI; plain text) ·
+ShroudGetPetInfo()→table · ShroudGetPartyMemberCount[InScene](),
+ShroudGetPartyMember{Name,CurrentHealth,MaxHealth,CurrentFocus,MaxFocus}[InScene](i|name) ·
+ShroudGetCurrentSceneName[Raw](),...Orientation/MaxPlayerCount/IsPVP/IsPOT(),
+ShroudGetCurrentDungeonName/Owner(),ShroudGetSceneCap(),ShroudGetGameTime(),
+ShroudWorldToScreenPoint(x,y,z)→vec3 · ShroudGetInventory()→list,ShroudGetEquipments()→list,
+decks ShroudCurrentDeck/DeckList/GetDeckCardList/SwitchDeck, emotes ShroudEmoteList/PlayEmote,
+ShroudStopFX.
+
+Immediate-mode GUI (only inside ShroudOnGUI; re-issue every frame; origin top-left)¶
+
+GOTCHA: lrx/lry params are Rect width/height, not lower-right. Texture funcs need a valid id or
+return false (draw nothing).
+ShroudGUILabel(x,y,w,h,text) · ShroudButton(x,y,w,h,texId,text,tooltip)→b (fires on click) ·
+ShroudButtonRepeat(...) (fires while held) · ShroudDrawTexture(x,y,w,h,texId)→b ·
+ShroudDrawTextureTooltip(x,y,w,h,texId,text)→b draw + register hover region (v3) ·
+ShroudGUITooltip(x,y,w,h,text)→b register hover region only (v3). Host draws the topmost
+hovered region's tooltip after all addons' OnGUI (last-drawn-under-cursor wins); registration lasts
+one GUI pass.
+
+Retained widgets (create in OnStart; ShroudUI*→id, then ShroudSet*/ShroudGet* by (id,kind))¶
+
+Create: ShroudUIText(text,...),ShroudUIImage,ShroudUIButton,ShroudUIPanel,ShroudUIInput,
+ShroudUIToggle. Transform: ShroudSet{Position,Size,Scale,Pivot,AnchorMin,AnchorMax,Transparency,
+Color,Rotation},ShroudGetPosition,ShroudMinMaxSize,ShroudSetResizable/Dragguable/Mask. Parent:
+ShroudSet{Text,Image,Button,Panel}Parent,ShroudSetParent,ShroudGetParentID/ObjectKind.
+Visibility: ShroudShow/HideObject,ShroudShow/HideLuaUI,ShroudDestroyObject,ShroudIsUIActive.
+Content: ShroudModifyText/Image,ShroudSetFontSize/TextAlignment. Input: ShroudSet/GetInputText,
+ShroudSetInput{CharacterLimit,ContentType,Readonly,BackgroundColor,PlaceholderText},
+ShroudGetInputText(id). Toggle: ShroudSet/GetToggle,ShroudSetToggleReadonly. Button style:
+ShroudSetButton{Color,Image,Transition}. Listeners: ShroudSet/UnsetClickListener,
+ShroudSet/UnsetInOutListener (drive OnMouseOver/Out/Click), ShroudRaycastObject.
+
+Textures / sound / input / timers / console¶
+
+ShroudLoadTexture(path)→id (confined to addon folder; .. escape→-1) ·
+ShroudGetTextureSize(id)→(w,h) · ShroudSetTextureClamp(id,bool). Sound: ShroudLoadSound (async;
+appears in ShroudListSound() after load), ShroudPlaySound(clip1based,...) returns 0-based
+channel — add 1 before ShroudStopSound/ShroudIsChannelPlaying (1-based), ShroudStopUISound,
+ShroudSceneMusic. Input: ShroudGetKeyDown/OnKeyDown/OnKeyUp(keyName) — keyName is a Unity
+KeyCode enum name (e.g. "LeftAlt","F1"). Timers: ShroudRegisterPeriodic(name,fn,secs,repeat),
+ShroudRemovePeriodic,ShroudListPeriodics. ShroudConsoleLog(s),ShroudUseLuaConsoleForPrint(b),
+ShroudForceGC.
+
+Saved variables (JSON at Lua/SavedVariables/<addon>.<scope>.json; written at logout/on demand)¶
+
+ShroudSetSavedVar(key,value,scope)→b (value: string|number|boolean|table|nil), ShroudGetSavedVar
+(key,scope)→any, ShroudDeleteSavedVar(key,scope), ShroudFlushSavedVars(). scope = "character"
+(default) | "account". Replaces io.* file writing.
+
+Data shapes¶
+
+RuneEffects (from ShroudGetPlayerBuff/GetPetBuff/GetTargetBuff): RuneName s, RuneId n,
+  IsDebuff b, IconId n (real skill icon texture id, -1; = ShroudGetBuffIcon) (v3),
+  StackCount n (grouped effect count, upper bound on stacks), Effects list of
+  { Description(stat-type string), Value, CurrentDuration, TotalDuration, TotalTick }.
+  NOTE grouped-by-rune → shorter than ShroudGetBuffCount (flat).
+
+GameTime,SceneCap,PetInfo,Deck,LuaVector2/3 — see human reference.
+
+Packaging (community addon store; loads from Lua/<slug>/)¶
+
+manifest.json: manifest_version(1), slug(3-40 ^[a-z][a-z0-9]*(-[a-z0-9]+)*$, not reserved),
+name(3-60), version(N.N.N, 0-9999 each, no leading zero), files(1-16 *.lua, load=exec
+order, unique stems), optional description/author/readme/icon(="icon.png"),
+min_api_version(int; loader refuses to ENABLE if client older, still parses), permissions(must be
+empty). Ref example: docs/examples/lua-addons/BuffIcons/. Loader/validation:
+LuaPackage{Manifest,Discovery,Installer,ZipPolicy}.cs, LuaSandboxPolicy.
+
+Sandbox¶
+
+io.*/os.remove|rename confined to Lua/. No arbitrary FS/network. Execution watchdog + error
+isolation per addon. Pure text/logic helpers live beside the manager and are EditMode-tested:
+LuaMouseLogic.cs, LuaBuffLogic.cs, LuaSavedVarsLogic.cs, LuaTargetLogic.cs.
+
+Adding a new binding (agent recipe)¶
+
+Lua_X(...) method in LuaManager.cs (read game state; return sentinel on missing state).
+
+Register in the matching InitAPI* block: m_bootScript.Globals["ShroudX"] =
+   (System.Func<...>)Lua_X; (target-frame funcs go near the Target region).
+
+New type returned to Lua → UserData.RegisterType<T>() in the registration block near line ~373.
+
+Bump kLuaApiVersion + comment; extend the human reference (lua-addon-api.md) AND this file.
+
+Pure logic → factor into a Lua*Logic.cs sibling and add PortedTests/ EditMode tests.
+
+Client-only; no Shared/ mirror, no net10 csproj concerns.
+
+Shroud of the Avatar · community Lua addon documentation. Generated from the client bindings. Docs home · Addon store
