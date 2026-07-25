@@ -42,6 +42,8 @@ cmd_setup() {
 cmd_scrape() {
     python3 tools/scrape.py
     python3 tools/genindex.py
+    # Keep the linter's view of the API in step with the docs it came from.
+    python3 tools/genglobals.py
 }
 
 cmd_build() {
@@ -72,7 +74,23 @@ cmd_test() {
 
 cmd_lint() {
     require_lua
-    "$LUA" tools/lint.lua
+    local status=0
+
+    # The in-repo check: no accidental globals, every module is a factory.
+    "$LUA" tools/lint.lua || status=1
+
+    # luacheck adds what a regex cannot: misspelled Shroud API names, unused
+    # locals, shadowing. Optional, because the repo's premise is that a bare
+    # interpreter is enough.
+    if command -v luacheck >/dev/null 2>&1; then
+        [ -f .luacheckrc ] || python3 tools/genglobals.py
+        luacheck core plugins tests tools || status=1
+    else
+        echo "luacheck not installed; skipping static analysis"
+        echo "  install it with: sudo apt install -y lua-check"
+    fi
+
+    return $status
 }
 
 cmd_install() {
