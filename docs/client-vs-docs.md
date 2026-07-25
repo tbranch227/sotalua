@@ -20,17 +20,32 @@ which returns a 0-based channel while `ShroudStopSound` takes a 1-based one.
 guessing an undocumented signature is a poor trade against the 1-second
 callback watchdog. If sound is ever added, probe it first.
 
-## 2. The six per-frame player globals may not exist at all
+## 2. The six per-frame player globals are absent after every reload
 
 `ShroudPlayerX`, `ShroudPlayerY`, `ShroudPlayerZ`, `ShroudPlayerCurrentHealth`,
-`ShroudPlayerCurrentFocus` and `ShroudPlayerGold` were **entirely absent from
-`_G`** on a logged-in character standing still, roughly 20 seconds after
-`/lua reload`.
+`ShroudPlayerCurrentFocus` and `ShroudPlayerGold` are **not created until their
+value next changes**, and `/lua reload` puts them back into that state.
+
+Observed sequence on one logged-in character:
+
+| Event | State |
+| --- | --- |
+| shortly after a reload, standing still | all six absent from `_G` |
+| after moving around the scene | all six present (`ShroudPlayerGold = 2648406`) |
+| `/lua reload`, then standing still | **all six absent again**, still absent a minute later |
+
+So this is not a one-off warm-up at login. Every reload returns the addon to a
+state where the player's position, vitals and gold simply do not exist, for as
+long as the character stands still.
 
 The reference describes them as "refreshed by the host on every frame while at
 least one addon is enabled" and notes parenthetically that "internally most use
-a dirty-check and are only re-pushed when they change". The client appears to
-take that further: until the first change, the global is never created.
+a dirty-check and are only re-pushed when they change". The client takes that
+literally: no change since the Lua environment was rebuilt means no global.
+
+**Consequence for addon authors:** `ShroudOnStart` is the *worst* moment to read
+these. An addon that captures a baseline there is guaranteed to capture nothing,
+on every single reload.
 
 **This is the most dangerous difference found**, because the obvious idiom
 produces a confident wrong answer rather than an error:
@@ -72,7 +87,18 @@ refused the write as outside the addon folder.
 `env.dataPath()` and `env.luaFile(name)` as functions that read the global at
 call time. There is no `env.LUA_PATH` constant.
 
-## 4. Enum tables are not enumerable
+## 4. A flat addon *can* write into the Lua folder
+
+Confirmed rather than assumed: with a correct absolute path built from
+`ShroudLuaPath`, `io.open(path, "w")` succeeds for a loose `.lua` addon
+installed directly in `Lua/`. The sandbox's "addon folder" for a flat addon is
+the `Lua/` folder itself, not a per-addon subdirectory.
+
+The earlier denials were self-inflicted — a snapshotted empty `ShroudLuaPath`
+produced `/api-export.txt`, which the sandbox correctly refused as outside the
+folder.
+
+## 5. Enum tables are not enumerable
 
 `UI`, `TextAnchor`, `ButtonMode`, `Transition`, `ContentType` and `AudioType`
 exist and their members resolve (`UI.Panel` works), but `pairs()` over them

@@ -151,6 +151,20 @@ store enforces, so a bad manifest fails locally rather than at submission.
 documented symbols with signatures and minimum API version. Re-run
 `./run.sh scrape` when the client's API changes.
 
+**[docs/client-vs-docs.md](docs/client-vs-docs.md) is required reading before
+trusting the reference.** A live client reporting API 4 disagrees with the
+published API 3 documentation in several ways, including one that makes the
+obvious code silently wrong: the six `ShroudPlayer*` per-frame globals do not
+exist until their value changes, and `/lua reload` returns them to that state.
+Reading them at `ShroudOnStart` always yields nothing.
+
+To re-check against a client: enable API Probe, run `/lua _ApiProbe_export`, then
+`python3 tools/diffapi.py`.
+
+Every bundle carries a content hash, printed by `/lua _ApiProbe_api` as
+`v1.0.0+39bd2ca9`. A stale build is otherwise indistinguishable from a current
+one from inside the client.
+
 ## Testing in game
 
 1. `./run.sh all && ./run.sh install`
