@@ -102,6 +102,113 @@ describe("crit-tracker", function()
             "Zealot attacks Death Metal Slime and hits, dealing 40 points of damage from Thrust."))
     end)
 
+    describe("pets", function()
+        local function withPet()
+            return { world = function(w)
+                w.luaPath = "/tmp/sotalua-crit-spec/"
+                w.player.name = "Zealot"
+                w.scene.name = "South Fetid Swamp"
+                w.pet = H.host.shape({ Name = "Shadow", Level = 40,
+                                       CurrentHealth = 200, MaxHealth = 300 })
+            end }
+        end
+
+        it("records a pet's critical separately from the player's", function()
+            build(withPet())
+            H.host.chat("Combat", "", REAL[4])   -- Zealot, Chaos Bolt 254
+            H.host.chat("Combat", "", "Shadow attacks Death Metal Slime and hits,"
+                .. " dealing 88 points of critical damage from Bite.")
+
+            assert_that.equal(254, plugin.records("player")["Chaos Bolt"].damage)
+            assert_that.equal(88, plugin.records("pet")["Bite"].damage)
+            -- A pet hit is not the player's personal best.
+            assert_that.nil_(plugin.records("player")["Bite"])
+            assert_that.equal(1, plugin.state.pets)
+            assert_that.equal(0, plugin.state.others, "the pet was treated as a stranger")
+        end)
+
+        it("keeps a skill name from colliding across player and pet", function()
+            build(withPet())
+            H.host.chat("Combat", "", "Zealot attacks X and hits,"
+                .. " dealing 300 points of critical damage from Rend.")
+            H.host.chat("Combat", "", "Shadow attacks X and hits,"
+                .. " dealing 40 points of critical damage from Rend.")
+
+            assert_that.equal(300, plugin.records("player")["Rend"].damage)
+            assert_that.equal(40, plugin.records("pet")["Rend"].damage)
+        end)
+
+        it("recognises a possessive attacker before matching the owner", function()
+            -- "Zealot's pet" begins with the player's own name, so a self check
+            -- running first would claim it.
+            build(withPet())
+            assert_that.is_true(plugin.isPet("Zealot's pet"))
+            assert_that.is_true(plugin.isPet("Zealot's Shadow"))
+            assert_that.is_false(plugin.isSelf("Grimwald"))
+
+            H.host.chat("Combat", "", "Zealot's pet attacks X and hits,"
+                .. " dealing 60 points of critical damage from Claw.")
+            assert_that.equal(60, plugin.records("pet")["Claw"].damage)
+            assert_that.nil_(plugin.records("player")["Claw"])
+        end)
+
+        it("still remembers the pet after it is dismissed", function()
+            -- ShroudGetPetInfo returns nil the moment a pet is gone, and a
+            -- critical can still be in flight.
+            build(withPet())
+            assert_that.equal("Shadow", plugin.petName())
+
+            H.host.world.pet = nil
+            M.poll.invalidate()
+            H.host.chat("Combat", "", "Shadow attacks X and hits,"
+                .. " dealing 70 points of critical damage from Bite.")
+            assert_that.equal(70, plugin.records("pet")["Bite"].damage)
+        end)
+
+        it("alerts on a pet record without claiming it as the player's", function()
+            build(withPet())
+            H.host.chat("Combat", "", "Shadow attacks X and hits,"
+                .. " dealing 40 points of critical damage from Bite.")
+            H.host.chat("Combat", "", "Shadow attacks X and hits,"
+                .. " dealing 95 points of critical damage from Bite.")
+
+            assert_that.equal("pet", plugin.state.lastAlert.source)
+            assert_that.is_true(H.host.hasText("PET BEST"))
+            assert_that.is_false(H.host.hasText("NEW BEST"))
+        end)
+
+        it("ignores pet criticals when switched off", function()
+            build(withPet())
+            M.settings.set("trackPet", false)
+            H.host.chat("Combat", "", "Shadow attacks X and hits,"
+                .. " dealing 88 points of critical damage from Bite.")
+
+            assert_that.nil_(plugin.records("pet")["Bite"])
+            assert_that.equal(1, plugin.state.others)
+        end)
+
+        it("honours a manual pet name for a client that reports none", function()
+            build()   -- no pet in the world at all
+            M.settings.set("petName", "Grimfang")
+            H.host.chat("Combat", "", "Grimfang attacks X and hits,"
+                .. " dealing 51 points of critical damage from Maul.")
+            assert_that.equal(51, plugin.records("pet")["Maul"].damage)
+        end)
+
+        it("tags the durable log with the source", function()
+            build(withPet())
+            H.host.chat("Combat", "", "Shadow attacks X and hits,"
+                .. " dealing 88 points of critical damage from Bite.")
+            M.store.flush()
+
+            local file = io.open("/tmp/sotalua-crit-spec/sotalua-crits-zealot.jsonl", "r")
+            local body = file:read("*a")
+            file:close()
+            assert_that.contains(body, '"source":"pet"')
+            assert_that.contains(body, '"attacker":"Shadow"')
+        end)
+    end)
+
     it("ignores another player's critical", function()
         -- The combat log is broadcast to everyone nearby, so without an
         -- attacker check a party member's record becomes yours.

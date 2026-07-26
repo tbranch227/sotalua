@@ -27,13 +27,23 @@ return function(Core)
         settings = {
             windows = { default = {} },
             records = { default = {} },        -- skill -> best hit
+            petRecords = { default = {} },     -- kept apart from the player's
             characterName = { default = "" },  -- override for combat-log matching
+            petName = { default = "" },
+            trackPet = { default = true, scope = "account" },
             extraPatterns = { default = {}, scope = "account" },
             capture = { default = false },
             alertSeconds = { default = 4, scope = "account" },
             minimumDamage = { default = 1, scope = "account" },
         },
     })
+
+    -- Declared before the parsing helpers, which read and write them. A local
+    -- is not in scope until its declaring statement completes, so a helper
+    -- defined above this line would silently reach for a global instead.
+    local view = { rows = {} }
+    local state = { lastAlert = nil, parsed = 0, captured = 0, unmatched = 0,
+                    others = 0, pets = 0, lines = 0, petName = nil }
 
     ----------------------------------------------------------------------
     -- Parsing
@@ -127,6 +137,45 @@ return function(Core)
         return nil
     end
 
+    --- The pet's name, remembered across the session.
+    --
+    -- ShroudGetPetInfo returns nil whenever the pet is dismissed, dead or not
+    -- yet summoned, and a critical can still be in flight at that moment, so
+    -- the last known name is kept rather than read fresh each time.
+    local function petName()
+        local override = Core.settings.get("petName")
+        if type(override) == "string" and override ~= "" then return override end
+
+        local pet = poll.pet()
+        local live = pet and util.nameOr(util.field(pet, "Name", nil), nil)
+        if live then state.petName = live end
+        return state.petName
+    end
+
+    --- Is this line describing the player's pet?
+    --
+    -- Two shapes are handled: the pet acting under its own name, and a
+    -- possessive form built from the owner's name. Which one this client uses
+    -- is unconfirmed, so both are accepted.
+    local function isPet(attacker)
+        if not attacker or attacker == "" then return false end
+        if not Core.settings.get("trackPet") then return false end
+
+        local lowered = attacker:lower()
+
+        local pet = petName()
+        if pet and lowered == pet:lower() then return true end
+
+        local mine = util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil)
+        local override = Core.settings.get("characterName")
+        if type(override) == "string" and override ~= "" then mine = override end
+        if mine then
+            -- "Zealot's pet", "Zealot's Wolf", and similar.
+            if lowered:sub(1, #mine + 2) == mine:lower() .. "'s" then return true end
+        end
+        return false
+    end
+
     --- Is this line describing the tracked character's own hit?
     --
     -- The combat log is broadcast for everyone nearby, so without this every
@@ -157,29 +206,43 @@ return function(Core)
     -- Records
     ----------------------------------------------------------------------
 
-    local view = { rows = {} }
-    local state = { lastAlert = nil, parsed = 0, captured = 0, unmatched = 0,
-                    others = 0, lines = 0 }
+    -- Player and pet records are kept apart rather than merged. A pet's hit is
+    -- not the player's personal best -- different skills, different scaling --
+    -- and folding them together would let a pet quietly own a skill name.
+    local KEY = { player = "records", pet = "petRecords" }
 
-    local function records()
-        return Core.settings.get("records") or {}
+    local function records(source)
+        return Core.settings.get(KEY[source or "player"]) or {}
     end
 
-    local function sortedRecords()
+    local function sortedRecords(source)
         local out = {}
-        for skill, entry in pairs(records()) do
+        for skill, entry in pairs(records(source)) do
             out[#out + 1] = { skill = skill, damage = entry.damage or 0,
-                              at = entry.at, scene = entry.scene, target = entry.target }
+                              at = entry.at, scene = entry.scene, target = entry.target,
+                              source = source or "player" }
         end
         return util.sortBy(out, function(item) return item.damage end, true)
     end
 
+    --- Both sets, player first, each sorted by damage.
+    local function allRecords()
+        local out = {}
+        for _, entry in ipairs(sortedRecords("player")) do out[#out + 1] = entry end
+        for _, entry in ipairs(sortedRecords("pet")) do out[#out + 1] = entry end
+        return out
+    end
+
     --- Celebrate a new personal best.
-    local function alert(skill, damage, previous)
+    local function alert(skill, damage, previous, source)
         if not view.alertText then return end
 
-        ui.setText(view.alertText, string.format("NEW BEST  %s  %s",
+        local isPetRecord = source == "pet"
+        ui.setText(view.alertText, string.format("%s  %s  %s",
+            isPetRecord and "PET BEST" or "NEW BEST",
             util.ellipsize(skill, 22), util.comma(damage)))
+        ui.setColor(view.alertText, isPetRecord and "#D8C0F0" or "#FFE9A8")
+        ui.setColor(view.alertBar, isPetRecord and "#9A6AC0" or "#C8A020")
         ui.setText(view.alertSub, previous
             and string.format("beat %s by %s", util.comma(previous), util.comma(damage - previous))
             or "first record")
@@ -190,7 +253,9 @@ return function(Core)
         ui.setVisible(view.alertPanel, true)
 
         fx.scale(view.alertPanel, 0.7, 1.0, 0.4, fx.ease.outBack)
-        fx.flash(view.alertBar, "#FFE9A8", "#C8A020", 0.5)
+        fx.flash(view.alertBar,
+            isPetRecord and "#E0C8FF" or "#FFE9A8",
+            isPetRecord and "#9A6AC0" or "#C8A020", 0.5)
         fx.tween({
             from = 0, to = 1, duration = Core.settings.get("alertSeconds") or 4,
             onUpdate = function(_, eased)
@@ -199,13 +264,14 @@ return function(Core)
             onComplete = function() ui.setVisible(view.alertPanel, false) end,
         })
 
-        log.say(string.format("New best critical: %s for %s%s",
-            skill, util.comma(damage),
+        log.say(string.format("New %sbest critical: %s for %s%s",
+            isPetRecord and "pet " or "", skill, util.comma(damage),
             previous and (" (was " .. util.comma(previous) .. ")") or ""))
     end
 
     --- Record a crit, alerting when it beats the stored best.
-    local function record(hit, message)
+    local function record(hit, message, source)
+        source = source or "player"
         local skill, damage = hit.skill, hit.damage
         if damage < (Core.settings.get("minimumDamage") or 1) then return false end
 
@@ -217,17 +283,19 @@ return function(Core)
 
         Core.store.append("crit", {
             skill = skill, damage = damage,
+            source = source,
+            attacker = hit.attacker or "",
             scene = scene and scene.name or "",
             target = target,
             line = message,
         })
 
-        local stored = records()
+        local stored = records(source)
         local previous = stored[skill] and stored[skill].damage or nil
 
         if previous and damage <= previous then return false end
 
-        Core.settings.update("records", function(all)
+        Core.settings.update(KEY[source], function(all)
             all[skill] = {
                 damage = damage,
                 at = ShroudServerTime or "",
@@ -237,15 +305,16 @@ return function(Core)
         end)
 
         if previous then
-            state.lastAlert = { skill = skill, damage = damage, previous = previous }
-            alert(skill, damage, previous)
+            state.lastAlert = { skill = skill, damage = damage,
+                                previous = previous, source = source }
+            alert(skill, damage, previous, source)
         else
             -- A first sighting gets no screen alert -- on a fresh install every
             -- skill would fire one -- but it does say so in chat. Without that
             -- there is no way to tell a working parser from a broken one until
             -- some unknown future hit happens to beat something.
-            log.info(string.format("first %s critical recorded: %s",
-                skill, util.comma(damage)))
+            log.info(string.format("first %s%s critical recorded: %s",
+                source == "pet" and "pet " or "", skill, util.comma(damage)))
         end
         return true
     end
@@ -286,6 +355,14 @@ return function(Core)
             return
         end
 
+        -- Pet before self: a possessive attacker like "Zealot's pet" starts
+        -- with the player's own name, so checking self first would claim it.
+        if isPet(hit.attacker) then
+            state.pets = state.pets + 1
+            record(hit, message, "pet")
+            return
+        end
+
         if not isSelf(hit.attacker) then
             -- Someone else's critical. The combat log is broadcast to everyone
             -- nearby, so this is the common case in a party.
@@ -294,7 +371,7 @@ return function(Core)
         end
 
         state.parsed = state.parsed + 1
-        record(hit, message)
+        record(hit, message, "player")
     end)
 
     ----------------------------------------------------------------------
@@ -303,26 +380,29 @@ return function(Core)
 
     local function render()
         if not view.window then return end
-        local sorted = sortedRecords()
+        local sorted = allRecords()
 
         view.window:setTitle(string.format("Crit Records  (%d)", #sorted))
 
         for i, row in ipairs(view.rows) do
             local entry = sorted[i]
             if entry then
-                ui.setText(row, string.format("%-20s %8s",
-                    util.ellipsize(entry.skill, 20), util.comma(entry.damage)))
+                local isPetRow = entry.source == "pet"
+                ui.setText(row, string.format("%-18s %8s%s",
+                    util.ellipsize(entry.skill, 18), util.comma(entry.damage),
+                    isPetRow and "  pet" or ""))
+                ui.setColor(row, isPetRow and "#C89AE0" or "#FFFFFF")
             else
                 ui.setText(row, "")
             end
         end
 
-        if #sorted == 0 then
-            ui.setText(view.rows[1] or view.status, "no records yet")
+        if #sorted == 0 and view.rows[1] then
+            ui.setText(view.rows[1], "no records yet")
         end
 
-        ui.setText(view.status, string.format("%d mine, %d others, %d unmatched%s",
-            state.parsed, state.others, state.unmatched,
+        ui.setText(view.status, string.format("%d mine, %d pet, %d others, %d unmatched%s",
+            state.parsed, state.pets, state.others, state.unmatched,
             Core.settings.get("capture") and "  [CAPTURING]" or ""))
     end
 
@@ -409,7 +489,12 @@ return function(Core)
             log.say("  ShroudOnConsoleInput. Say something in chat to tell them apart.")
         end
         log.say(string.format("criticals recorded as mine: %d", state.parsed))
+        log.say(string.format("criticals recorded for my pet: %d", state.pets))
         log.say(string.format("criticals belonging to others: %d", state.others))
+        if state.others > 0 and state.pets == 0 then
+            log.say("  if some of those are your pet, name it with"
+                .. " /lua _CritTracker_pet <Name>")
+        end
         log.say(string.format("mentioned a critical but did not parse: %d", state.unmatched))
         if state.unmatched > 0 then
             log.say("  run /lua _CritTracker_capture and fight, then send a sample")
@@ -421,18 +506,46 @@ return function(Core)
     end)
 
     addon.command("records", function()
-        local sorted = sortedRecords()
+        local sorted = allRecords()
         if #sorted == 0 then
             log.say("no records yet")
             return
         end
         log.say(string.format("%d skill record(s):", #sorted))
         for _, entry in ipairs(sorted) do
-            log.say(string.format("  %-24s %10s   %s%s",
+            log.say(string.format("  %-6s %-22s %10s   %s%s",
+                entry.source == "pet" and "[pet]" or "",
                 entry.skill, util.comma(entry.damage),
-                entry.target ~= "" and ("vs " .. entry.target) or "",
-                entry.scene ~= "" and ("  in " .. entry.scene) or ""))
+                (entry.target or "") ~= "" and ("vs " .. entry.target) or "",
+                (entry.scene or "") ~= "" and ("  in " .. entry.scene) or ""))
         end
+    end)
+
+    --- Show or set the pet name matched against the combat log.
+    addon.command("pet", function(...)
+        local override = util.trim(table.concat({ ... }, " "))
+        if override == "off" then
+            Core.settings.set("trackPet", false)
+            log.say("pet criticals will be ignored")
+            return
+        end
+        if override == "on" then
+            Core.settings.set("trackPet", true)
+            log.say("pet criticals will be tracked separately")
+            return
+        end
+        if override ~= "" then
+            Core.settings.set("petName", override)
+            log.say("pet combat lines will be matched against " .. override)
+            return
+        end
+        local pet = poll.pet()
+        log.say("tracking pet criticals: " .. tostring(Core.settings.get("trackPet")))
+        log.say("ShroudGetPetInfo reports: "
+            .. (pet and tostring(util.field(pet, "Name", "(no name)")) or "(no pet)"))
+        log.say("remembered name: " .. (state.petName or "(none)"))
+        log.say("override: " .. ((Core.settings.get("petName") ~= "" and Core.settings.get("petName")) or "(none)"))
+        log.say("set one with /lua _CritTracker_pet <Name>, or 'off' to ignore pets")
     end)
 
     --- Try a line against the patterns without waiting for combat.
@@ -497,15 +610,19 @@ return function(Core)
         end
         if skill == "all" then
             Core.settings.set("records", {})
-            log.say("all records cleared")
+            Core.settings.set("petRecords", {})
+            log.say("all records cleared, player and pet")
             return
         end
         Core.settings.update("records", function(all) all[skill] = nil end)
+        Core.settings.update("petRecords", function(all) all[skill] = nil end)
         log.say("cleared the record for " .. tostring(skill))
     end)
 
     return {
-        view = view, state = state, parse = parse, record = record, isSelf = isSelf,
-        records = records, sortedRecords = sortedRecords, looksLikeCrit = looksLikeCrit,
+        view = view, state = state, parse = parse, record = record,
+        isSelf = isSelf, isPet = isPet, petName = petName,
+        records = records, sortedRecords = sortedRecords, allRecords = allRecords,
+        looksLikeCrit = looksLikeCrit,
     }
 end
