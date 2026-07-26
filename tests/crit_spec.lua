@@ -131,13 +131,27 @@ describe("crit-tracker", function()
         assert_that.is_false(plugin.isSelf("Zealot"))
     end)
 
-    it("stores the first sighting quietly", function()
+    it("stores the first sighting without a screen alert", function()
         build()
         H.host.chat("Combat", "", REAL[4])   -- Chaos Bolt, 254
 
         assert_that.equal(254, plugin.records()["Chaos Bolt"].damage)
-        -- Nothing to beat yet; alerting here would fire for every new skill.
+        -- No screen alert: on a fresh install every skill would fire one.
         assert_that.nil_(plugin.state.lastAlert)
+        assert_that.is_false(H.host.hasText("NEW BEST"))
+        -- But it must say something, or a working parser is indistinguishable
+        -- from a broken one until some future hit happens to beat a record.
+        assert_that.is_true(H.host.consoleContains("first Chaos Bolt critical recorded: 254"))
+    end)
+
+    it("counts every chat line, so silence can be diagnosed", function()
+        build()
+        H.host.chat("Say", "Bob", "hello")
+        H.host.chat("Combat", "", REAL[4])
+        -- Zero here during a fight would mean the client is not routing combat
+        -- text through ShroudOnConsoleInput at all -- a different problem from
+        -- a pattern that fails to match.
+        assert_that.equal(2, plugin.state.lines)
     end)
 
     it("alerts only when a stored record is beaten", function()

@@ -158,7 +158,8 @@ return function(Core)
     ----------------------------------------------------------------------
 
     local view = { rows = {} }
-    local state = { lastAlert = nil, parsed = 0, captured = 0, unmatched = 0, others = 0 }
+    local state = { lastAlert = nil, parsed = 0, captured = 0, unmatched = 0,
+                    others = 0, lines = 0 }
 
     local function records()
         return Core.settings.get("records") or {}
@@ -235,11 +236,16 @@ return function(Core)
             }
         end)
 
-        -- A first sighting is stored quietly; there is nothing to beat yet, and
-        -- alerting on every new skill would fire constantly on a fresh install.
         if previous then
             state.lastAlert = { skill = skill, damage = damage, previous = previous }
             alert(skill, damage, previous)
+        else
+            -- A first sighting gets no screen alert -- on a fresh install every
+            -- skill would fire one -- but it does say so in chat. Without that
+            -- there is no way to tell a working parser from a broken one until
+            -- some unknown future hit happens to beat something.
+            log.info(string.format("first %s critical recorded: %s",
+                skill, util.comma(damage)))
         end
         return true
     end
@@ -250,6 +256,11 @@ return function(Core)
 
     addon.onChat(function(inputType, source, message)
         if type(message) ~= "string" or message == "" then return end
+
+        -- Counted before any filtering. If this stays at zero through a fight,
+        -- the client is not routing combat text through ShroudOnConsoleInput at
+        -- all, which is a different problem from a pattern that does not match.
+        state.lines = state.lines + 1
 
         if Core.settings.get("capture") then
             -- Discovery mode: record everything verbatim, with its type, so the
@@ -357,8 +368,9 @@ return function(Core)
             ui.setVisible(view.alertPanel, false)
         end
 
-        log.info("no combat API exists, so this parses chat."
-            .. " If nothing appears during a fight, run /lua _CritTracker_capture")
+        log.info("parsing chat for criticals. First hit per skill is recorded"
+            .. " quietly; beating one shows an alert. /lua _CritTracker_demo to"
+            .. " preview it, _status to check it is seeing chat at all")
     end)
 
     addon.tick(1.0, render)
@@ -377,6 +389,35 @@ return function(Core)
             log.say(string.format("capture off; %d line(s) recorded to the crits log",
                 state.captured))
         end
+    end)
+
+    --- Show the alert with invented numbers, touching no records.
+    addon.command("demo", function()
+        alert("Chaos Bolt", 999, 283)
+        log.say("that is what beating a record looks like; no records were changed")
+    end)
+
+    --- Is anything arriving at all? Distinguishes three different failures:
+    --- no chat reaching the addon, chat arriving but not matching, and matches
+    --- belonging to other players.
+    addon.command("status", function()
+        log.say("--- crit tracker ---")
+        log.say(string.format("chat lines seen: %d", state.lines))
+        if state.lines == 0 then
+            log.say("  none at all. Either no chat has happened since the last")
+            log.say("  reload, or this client does not route combat text through")
+            log.say("  ShroudOnConsoleInput. Say something in chat to tell them apart.")
+        end
+        log.say(string.format("criticals recorded as mine: %d", state.parsed))
+        log.say(string.format("criticals belonging to others: %d", state.others))
+        log.say(string.format("mentioned a critical but did not parse: %d", state.unmatched))
+        if state.unmatched > 0 then
+            log.say("  run /lua _CritTracker_capture and fight, then send a sample")
+        end
+        local sorted = sortedRecords()
+        log.say(string.format("skills with a record: %d", #sorted))
+        log.say("matching against character name: "
+            .. (util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil) or "(unknown)"))
     end)
 
     addon.command("records", function()
