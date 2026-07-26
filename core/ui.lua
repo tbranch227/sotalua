@@ -259,6 +259,19 @@ return function(M)
         return ShroudSetTransparency(w.id, w.kind, M.util.clamp(alpha, 0, 1))
     end
 
+    --- Uniform scale; the host takes a single factor, not per-axis.
+    function UIx.setScale(w, scale)
+        if not w then return false end
+        return ShroudSetScale(w.id, w.kind, scale)
+    end
+
+    --- Absolute Z rotation in degrees. ShroudRotateObject sets rather than
+    --- accumulates, so passing the same value twice is a no-op, not a spin.
+    function UIx.setRotation(w, degrees)
+        if not w then return false end
+        return ShroudRotateObject(w.id, w.kind, degrees)
+    end
+
     --- Update a text widget's string. ShroudModifyText takes no kind argument.
     function UIx.setText(w, text)
         if not w or w.kind ~= UI.Text then return false end

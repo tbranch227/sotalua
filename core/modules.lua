@@ -14,6 +14,7 @@ return {
     "timers",   -- env, log, util
     "poll",     -- env, util
     "ui",       -- env, log, util, events
+    "fx",       -- ui, events, env, util
     "layout",   -- ui, settings, timers, events, util
     "addon",    -- everything above
 }

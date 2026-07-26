@@ -26,6 +26,7 @@ return function(M)
 
         M.ui.install()
         M.poll.install()
+        if opts.fx ~= false then M.fx.install() end
 
         -- One global per addon for the timer pump. Derived from the slug so two
         -- addons in the shared environment cannot collide.

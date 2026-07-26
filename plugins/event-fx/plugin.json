@@ -1,0 +1,9 @@
+{
+  "slug": "event-fx",
+  "name": "Event FX",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Screen feedback for things that happen: floating experience numbers, a low-health edge pulse, a combat indicator, and a scene banner on arrival. Every effect can be switched off individually.",
+  "minApiVersion": 1,
+  "permissions": []
+}
