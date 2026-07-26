@@ -23,6 +23,27 @@ local Host = {}
 
 local INVALID = -999
 
+--- Wrap a table so it behaves like the host's userdata data shapes.
+--
+-- This is the difference that broke a live client: RuneEffects, PetInfo,
+-- GameTime and SceneCap are userdata, not tables. Reading a key a table does
+-- not have yields nil; reading a field userdata does not have *throws*. Since
+-- clients disagree about which fields exist -- an older build has no RuneId or
+-- IconId on RuneEffects -- a mock returning plain tables would let unguarded
+-- field reads pass every test and then kill the callback in game.
+local function shape(fields)
+    return setmetatable({}, {
+        __index = function(_, key)
+            if fields[key] ~= nil then return fields[key] end
+            error("cannot access field " .. tostring(key) .. " of userdata<shape>", 2)
+        end,
+        __newindex = function() error("data shapes are read-only snapshots", 2) end,
+        __pairs = function() return pairs(fields) end,
+    })
+end
+
+Host.shape = shape
+
 ----------------------------------------------------------------------
 -- World state, freely mutable from tests
 ----------------------------------------------------------------------
@@ -75,10 +96,10 @@ local function freshWorld()
             name = "Solace Bridge", raw = "Novia_R1_Forest01",
             orientation = 0, maxPlayers = 24, isPvp = false, isPot = false,
             dungeon = "", dungeonOwner = "",
-            cap = { Level = 30, Skill = 80 },
+            cap = shape({ Level = 30, Skill = 80 }),
         },
-        gameTime = { Day = 12, Hour = 14.5, Month = 3, Year = 452,
-                     PeriodOfDay = "Day", Season = "Spring" },
+        gameTime = shape({ Day = 12, Hour = 14.5, Month = 3, Year = 452,
+                           PeriodOfDay = "Day", Season = "Spring" }),
 
         keysDown = {},
         keysPressed = {},
@@ -186,6 +207,38 @@ function Host.install()
     return Host
 end
 
+-- Bindings that arrived with a given API version. An older client does not
+-- merely return nil from these, it does not have them at all -- which is why
+-- feature detection has to ask whether the function exists, not only what
+-- ShroudLuaApiVersion says.
+local VERSIONED_BINDINGS = {
+    [1] = { "ShroudHasTarget", "ShroudGetTargetName", "ShroudGetTargetId",
+            "ShroudIsTargetDead", "ShroudIsTargetHealthHidden",
+            "ShroudGetTargetCurrentHealth", "ShroudGetTargetMaxHealth",
+            "ShroudGetTargetCurrentFocus", "ShroudGetTargetMaxFocus",
+            "ShroudGetTargetBuff", "ShroudGetTargetBuffCount",
+            "ShroudGetTargetBuffName", "ShroudGetTargetBuffDescription",
+            "ShroudGetTargetBuffTimeRemaining", "ShroudGetTargetStatValueByNumber",
+            "ShroudGetTargetStatValueByName" },
+    [2] = { "ShroudGetKindUnderMouse", "ShroudGetNameUnderMouse",
+            "ShroudGetDescriptionUnderMouse", "ShroudGetIdUnderMouse" },
+    [3] = { "ShroudGetBuffIcon", "ShroudGetBuffTooltip", "ShroudGetTargetBuffIcon",
+            "ShroudGetTargetBuffTooltip", "ShroudDrawTextureTooltip", "ShroudGUITooltip" },
+}
+
+--- Remove bindings newer than the configured API version.
+function Host.applyApiVersion()
+    for required, names in pairs(VERSIONED_BINDINGS) do
+        for _, name in ipairs(names) do
+            if world.apiVersion < required then
+                _G[name] = nil
+            elseif Host.api[name] then
+                _G[name] = Host.api[name]
+            end
+        end
+    end
+end
+
 --- Push the per-frame globals, as the host does each frame.
 --
 -- world.playerGlobalsPending models what a real API 4 client does: the six
@@ -193,7 +246,10 @@ end
 -- until the host first publishes them, so an addon can observe a logged-in
 -- character with no position, health, focus or gold available at all.
 function Host.refreshGlobals()
-    _G.ShroudLuaApiVersion = world.apiVersion
+    -- A live client was observed publishing no ShroudLuaApiVersion at all while
+    -- still providing most of the API, so the global's absence is a state worth
+    -- being able to reproduce.
+    _G.ShroudLuaApiVersion = world.publishApiVersion ~= false and world.apiVersion or nil
     _G.ShroudLuaPath = world.luaPath
     _G.ShroudDataPath = world.dataPath
     _G.ShroudTime = world.time

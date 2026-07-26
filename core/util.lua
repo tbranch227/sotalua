@@ -39,6 +39,30 @@ return function(_M)
         return fallback
     end
 
+    --- Read a field from a host-returned object without risking an error.
+    --
+    -- The documented data shapes (RuneEffects, PetInfo, GameTime, SceneCap) are
+    -- userdata, not tables. That difference matters: reading a missing key from
+    -- a table yields nil, but reading a missing field from userdata *throws*.
+    -- Clients disagree about which fields exist -- an older build has no
+    -- RuneId or IconId on RuneEffects -- so every field read on a host object
+    -- has to be guarded or the whole callback dies.
+    function U.field(object, name, default)
+        if object == nil then return default end
+        local ok, value = pcall(function() return object[name] end)
+        if not ok or value == nil then return default end
+        return value
+    end
+
+    --- Read the first field that exists, for names that differ across clients.
+    function U.firstField(object, names, default)
+        for _, name in ipairs(names) do
+            local value = U.field(object, name, nil)
+            if value ~= nil then return value end
+        end
+        return default
+    end
+
     function U.clamp(v, lo, hi)
         if v < lo then return lo end
         if v > hi then return hi end

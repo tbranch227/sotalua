@@ -26,10 +26,14 @@ function Helper.bootstrap(opts)
 
     Helper.host.install()
     if opts.apiVersion then Helper.host.world.apiVersion = opts.apiVersion end
+    if opts.publishApiVersion ~= nil then
+        Helper.host.world.publishApiVersion = opts.publishApiVersion
+    end
     if opts.world then opts.world(Helper.host.world) end
     -- Re-push after the fixture has run: install() already published one set of
     -- globals, so a fixture that changes the API version or withholds the
     -- per-frame player values would otherwise have no effect.
+    Helper.host.applyApiVersion()
     Helper.host.refreshGlobals()
 
     local M = {}
@@ -102,27 +106,36 @@ function Helper.teardown()
     Helper.core = nil
 end
 
---- A rune table shaped like what ShroudGetPlayerBuff returns.
+--- A rune shaped like what ShroudGetPlayerBuff returns.
+--
+-- Returned as a userdata-like proxy, not a table, because that is what the host
+-- hands back: a field the client does not provide throws rather than yielding
+-- nil. Pass `legacy = true` to model an older client with no RuneId or IconId,
+-- which is what a live build was observed doing.
 function Helper.rune(name, opts)
     opts = opts or {}
     local effects = {}
     for _, effect in ipairs(opts.effects or { { duration = opts.duration or 30 } }) do
-        effects[#effects + 1] = {
+        effects[#effects + 1] = Helper.host.shape({
             Description = effect.description or (name .. " effect"),
             Value = effect.value or 1,
             CurrentDuration = effect.duration or 30,
             TotalDuration = effect.total or effect.duration or 30,
             TotalTick = effect.ticks or 1,
-        }
+        })
     end
-    return {
+
+    local fields = {
         RuneName = name,
-        RuneId = opts.id or 1,
         IsDebuff = opts.debuff or false,
-        IconId = opts.icon or -1,
         StackCount = #effects,
         Effects = effects,
     }
+    if not opts.legacy then
+        fields.RuneId = opts.id or 1
+        fields.IconId = opts.icon or -1
+    end
+    return Helper.host.shape(fields)
 end
 
 --- An inventory item table the mock turns into a 14-field tuple.

@@ -114,6 +114,29 @@ describe("env", function()
             "20 failures must not spend the host's 8-errors-in-10s budget")
     end)
 
+    it("detects features by binding when the client publishes no version", function()
+        -- A live client reported no ShroudLuaApiVersion at all while still
+        -- providing the API. Gating purely on the number would refuse to use
+        -- functions that are demonstrably present.
+        M = H.bootstrap({ apiVersion = 3, publishApiVersion = false })
+        assert_that.nil_(rawget(_G, "ShroudLuaApiVersion"))
+        assert_that.equal(0, M.env.API)
+        assert_that.is_false(M.env.VERSIONED)
+
+        assert_that.is_true(M.env.HAS_TARGET, "target bindings exist but were gated off")
+        assert_that.is_true(M.env.HAS_MOUSE)
+        assert_that.is_true(M.env.HAS_ICONS)
+    end)
+
+    it("still gates a feature whose binding is genuinely absent", function()
+        -- An older client does not merely return nil from a newer function, it
+        -- does not have it, so detection must not become "assume everything".
+        M = H.bootstrap({ apiVersion = 1, publishApiVersion = false })
+        assert_that.is_true(M.env.HAS_TARGET)
+        assert_that.is_false(M.env.HAS_MOUSE, "under-mouse API is absent at version 1")
+        assert_that.is_false(M.env.HAS_ICONS)
+    end)
+
     it("substitutes a fallback for a binding the client does not have", function()
         M = H.bootstrap()
         local missing = M.env.optional("ShroudNotARealFunction", -1)
@@ -451,6 +474,42 @@ describe("poll", function()
         end
         -- 30 frames is half a second; the TTL is five.
         assert_that.equal(1, calls, "inventory was polled " .. calls .. " times in half a second")
+    end)
+
+    it("reads a rune from a client that has no RuneId or IconId", function()
+        -- The exact failure seen in game: "cannot access field RuneId of
+        -- userdata<LuaManager+RuneEffects>". Data shapes are userdata, so a
+        -- missing field throws rather than yielding nil, and one unguarded read
+        -- takes down the whole callback.
+        M = H.bootstrap({ world = function(w)
+            w.playerBuffs = {
+                H.rune("Shield of Air", { duration = 120, legacy = true }),
+                H.rune("Chill", { debuff = true, duration = 30, legacy = true }),
+            }
+        end })
+
+        local buffs
+        assert_that.no_error(function() buffs = M.poll.playerBuffs() end)
+        assert_that.equal(2, #buffs)
+        assert_that.equal("Shield of Air", buffs[1].name)
+        assert_that.equal(120, buffs[1].remaining)
+        -- Absent fields fall back rather than erroring.
+        assert_that.equal(-1, buffs[1].id)
+        assert_that.equal(-1, buffs[1].iconId)
+        assert_that.is_true(buffs[2].isDebuff)
+    end)
+
+    it("reads a data shape missing fields without throwing", function()
+        M = H.bootstrap({ world = function(w)
+            -- A pet from a client that reports no attributes.
+            w.pet = H.host.shape({ Name = "Wolf", CurrentHealth = 40, MaxHealth = 90 })
+        end })
+
+        local pet
+        assert_that.no_error(function() pet = M.poll.pet() end)
+        assert_that.equal("Wolf", pet.Name)
+        assert_that.equal(40, pet.CurrentHealth)
+        assert_that.nil_(pet.Strength, "an absent field must read as nil, not throw")
     end)
 
     it("hides the under-mouse API on a client older than API 2", function()

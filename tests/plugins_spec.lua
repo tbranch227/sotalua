@@ -53,8 +53,10 @@ describe("plugin lifecycle", function()
             H.host.gainExperience("Adventurer", 450)
             H.host.gainExperience("Producer", 25)
 
-            -- Buffs tick down; targets change; the world moves.
-            H.host.world.playerBuffs[2].Effects[1].CurrentDuration = 2
+            -- Buffs tick down; targets change; the world moves. Data shapes are
+            -- read-only snapshots, as the host's userdata is, so the rune is
+            -- replaced rather than edited in place.
+            H.host.world.playerBuffs[2] = H.rune("Blood Lust", { duration = 2, icon = 12 })
             H.host.world.target.health = 40
             H.host.frames(90, 1 / 30)
 
@@ -97,6 +99,39 @@ describe("plugin lifecycle", function()
             for _, line in ipairs(H.host.console()) do
                 assert_that.falsy(line:find("ERROR", 1, true),
                     slug .. " errored in an empty world: " .. line)
+            end
+        end)
+    end
+
+    for _, slug in ipairs(PLUGINS) do
+        it(slug .. " runs on an unversioned client with legacy data shapes", function()
+            -- The live client: no ShroudLuaApiVersion, and RuneEffects without
+            -- RuneId or IconId. Every addon must degrade rather than error.
+            local M = H.bootstrap({
+                publishApiVersion = false,
+                world = function(w)
+                    populatedWorld(w)
+                    w.playerBuffs = {
+                        H.rune("Shield of Air", { duration = 300, legacy = true }),
+                        H.rune("Chill", { debuff = true, duration = -1, legacy = true }),
+                    }
+                    w.petBuffs = { H.rune("Pet Ward", { duration = 60, legacy = true }) }
+                    w.target.buffs = { H.rune("Weakness", { debuff = true, duration = 12, legacy = true }) }
+                end,
+            })
+            H.plugin(slug, M)
+            H.installHandlers(M)
+
+            H.host.start()
+            H.host.frames(120, 1 / 30)
+            H.host.loadScene("Etceter")
+            H.host.frames(60, 1 / 30)
+            H.host.logout()
+            H.host.disable()
+
+            for _, line in ipairs(H.host.console()) do
+                assert_that.falsy(line:find("ERROR", 1, true),
+                    slug .. " errored on the unversioned client: " .. line)
             end
         end)
     end

@@ -125,10 +125,13 @@ return function(Core)
         ui.setText(view.hitch, string.format("hitches %d   last %s ago",
             state.hitches, util.duration(state.sinceHitch)))
 
-        -- Lua 5.2 style: KB plus the remainder in bytes.
-        local kb = collectgarbage("count")
-        ui.setText(view.heap, string.format("heap %s KB   worst frame %.0f ms",
-            util.comma(math.floor(kb)), state.worst * 1000))
+        -- Lua 5.2 style: KB plus the remainder in bytes. The host overrides
+        -- collectgarbage, and an older client returns nothing at all from
+        -- "count", so this cannot be handed straight to math.floor.
+        local kb = tonumber(collectgarbage("count"))
+        ui.setText(view.heap, string.format("heap %s   worst frame %.0f ms",
+            kb and (util.comma(math.floor(kb)) .. " KB") or "unavailable",
+            state.worst * 1000))
     end)
 
     -- Donate a small, bounded slice of GC work. Incremental by design; a full
@@ -153,8 +156,10 @@ return function(Core)
 
     addon.command("report", function()
         local mean, peak, fps = summarize()
-        log.say(string.format("fps %.1f, mean frame %.2f ms, peak %.2f ms, %d hitches, heap %s KB",
-            fps, mean * 1000, peak * 1000, state.hitches, util.comma(math.floor(collectgarbage("count")))))
+        local kb = tonumber(collectgarbage("count"))
+        log.say(string.format("fps %.1f, mean frame %.2f ms, peak %.2f ms, %d hitches, heap %s",
+            fps, mean * 1000, peak * 1000, state.hitches,
+            kb and (util.comma(math.floor(kb)) .. " KB") or "unavailable"))
     end)
 
     return { state = state, view = view }

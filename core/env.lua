@@ -13,9 +13,23 @@ return function(M)
     --   1  target API              (#746)
     --   2  under-mouse API         (#1031)
     --   3  buff icons and tooltips
-    E.HAS_TARGET = E.API >= 1
-    E.HAS_MOUSE = E.API >= 2
-    E.HAS_ICONS = E.API >= 3
+    --
+    -- The version number alone is not sufficient. A live client was observed
+    -- reporting no ShroudLuaApiVersion at all -- so API reads as 0 -- while
+    -- still providing plenty of the API. Gating purely on the number would
+    -- refuse to use functions that are demonstrably present.
+    --
+    -- So: trust the version when it is published, and otherwise ask whether the
+    -- binding itself exists. The presence of the function is the fact that
+    -- actually matters; the version is only a convenient summary of it.
+    local function has(fnName)
+        return type(_G[fnName]) == "function"
+    end
+
+    E.HAS_TARGET = E.API >= 1 or has("ShroudHasTarget")
+    E.HAS_MOUSE = E.API >= 2 or has("ShroudGetKindUnderMouse")
+    E.HAS_ICONS = E.API >= 3 or has("ShroudGetBuffIcon")
+    E.VERSIONED = ShroudLuaApiVersion ~= nil
 
     -- Read live, not snapshotted.
     --
@@ -123,8 +137,9 @@ return function(M)
     -- looks identical to a current one.
     function E.describe()
         return string.format(
-            "%s v%s+%s (slug=%s) on Lua API %d [target=%s mouse=%s icons=%s]",
-            state.name, state.version, M.buildId or "src", state.slug, E.API,
+            "%s v%s+%s (slug=%s) on Lua API %s [target=%s mouse=%s icons=%s]",
+            state.name, state.version, M.buildId or "src", state.slug,
+            E.VERSIONED and tostring(E.API) or "unversioned (detected by binding)",
             tostring(E.HAS_TARGET), tostring(E.HAS_MOUSE), tostring(E.HAS_ICONS)
         )
     end

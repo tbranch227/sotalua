@@ -53,28 +53,44 @@ return function(M)
     --
     -- StackCount is documented as #Effects rather than a true stack count, so
     -- it is exposed as `effectCount` to stop callers reading it as stacks.
+    -- Every read below goes through util.field. RuneEffects is userdata, and a
+    -- client without RuneId or IconId throws on the plain `rune.RuneId` rather
+    -- than yielding nil -- which killed the whole callback on an older build.
     local function normalizeRunes(raw)
+        local field = M.util.field
         local out = {}
         for _, rune in ipairs(M.util.list(raw)) do
+            local effects = M.util.list(field(rune, "Effects", nil))
+
+            -- The rune carries no duration of its own; the stock buff bar shows
+            -- the longest of its effects.
+            local longest = -1
+            for _, effect in ipairs(effects) do
+                local duration = field(effect, "CurrentDuration", nil)
+                if type(duration) == "number" and duration > longest then
+                    longest = duration
+                end
+            end
+
             out[#out + 1] = {
-                name = M.util.nameOr(rune.RuneName, "Unknown"),
-                id = rune.RuneId,
-                isDebuff = rune.IsDebuff == true,
-                iconId = M.env.HAS_ICONS and rune.IconId or -1,
-                effectCount = rune.StackCount or 0,
-                effects = M.util.list(rune.Effects),
-                remaining = -1,
+                name = M.util.nameOr(field(rune, "RuneName", nil), "Unknown"),
+                id = field(rune, "RuneId", -1),
+                isDebuff = field(rune, "IsDebuff", false) == true,
+                iconId = M.env.HAS_ICONS and field(rune, "IconId", -1) or -1,
+                effectCount = field(rune, "StackCount", #effects),
+                effects = effects,
+                remaining = longest,
             }
         end
-        -- The rune itself carries no duration; take the longest of its effects,
-        -- which is what the stock buff bar shows.
-        for _, rune in ipairs(out) do
-            local longest = -1
-            for _, effect in ipairs(rune.effects) do
-                local d = effect.CurrentDuration
-                if type(d) == "number" and d > longest then longest = d end
-            end
-            rune.remaining = longest
+        return out
+    end
+
+    --- Copy a userdata data shape into a plain table, guarding every field.
+    local function shape(object, names)
+        if object == nil then return nil end
+        local out = {}
+        for key, source in pairs(names) do
+            out[key] = M.util.field(object, source, nil)
         end
         return out
     end
@@ -259,22 +275,20 @@ return function(M)
     function P.gameTime()
         return frameCache("gameTime", function()
             if not ShroudGetGameTime then return nil end
-            local t = ShroudGetGameTime()
-            if not t or (t.Day == 0 and t.Month == 0) then return nil end
-            return {
-                day = t.Day, month = t.Month, year = t.Year,
-                hour = t.Hour,
-                period = t.PeriodOfDay, season = t.Season,
-            }
+            local t = shape(ShroudGetGameTime(), {
+                day = "Day", month = "Month", year = "Year", hour = "Hour",
+                period = "PeriodOfDay", season = "Season",
+            })
+            -- A zeroed table is how the host reports "no game time".
+            if not t or ((t.day or 0) == 0 and (t.month or 0) == 0) then return nil end
+            return t
         end)
     end
 
     function P.sceneCap()
         return frameCache("sceneCap", function()
             if not ShroudGetSceneCap then return nil end
-            local cap = ShroudGetSceneCap()
-            if not cap then return nil end
-            return { level = cap.Level, skill = cap.Skill }
+            return shape(ShroudGetSceneCap(), { level = "Level", skill = "Skill" })
         end)
     end
 
@@ -312,10 +326,21 @@ return function(M)
         return fields
     end
 
+    --- Pet info, flattened into a plain table.
+    --
+    -- Returned as a table rather than the host's userdata so a consumer can
+    -- read a field an older client does not provide without throwing. Note
+    -- `isSummon` is lower-camelCase where its siblings are upper; that is the
+    -- documented spelling, not a slip here.
     function P.pet()
         return frameCache("pet", function()
             if not ShroudGetPetInfo then return nil end
-            return ShroudGetPetInfo()
+            return shape(ShroudGetPetInfo(), {
+                Name = "Name", Level = "Level", isSummon = "isSummon",
+                CurrentHealth = "CurrentHealth", MaxHealth = "MaxHealth",
+                Strength = "Strength", Dexterity = "Dexterity",
+                Intelligence = "Intelligence",
+            })
         end)
     end
 
