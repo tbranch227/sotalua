@@ -25,9 +25,10 @@ OUTPUT = os.path.join(ROOT, ".luacheckrc")
 # game would not have gets flagged here instead of failing in the client.
 STD = "lua52"
 
-# Present under MoonSharp and 5.1 but not in the lua52 std: core/timers.lua
-# resolves `table.unpack or unpack` once, on purpose.
-EXTRA_READ_GLOBALS = ["unpack"]
+# Present under MoonSharp and 5.1 but not in the lua52 std. Both are resolved
+# with a `newName or oldName` fallback so the code runs on either: core/timers
+# needs `table.unpack or unpack`, core/settings needs `load or loadstring`.
+EXTRA_READ_GLOBALS = ["unpack", "loadstring"]
 
 # Defined by tests/runner.lua and used across the specs.
 SPEC_GLOBALS = [

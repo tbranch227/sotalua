@@ -205,6 +205,7 @@ read_globals = {
     "GetStatNameByNumber",
     "GetStatValueByName",
     "unpack",
+    "loadstring",
     AudioType = { fields = {
         "AIFF",
         "MPEG",

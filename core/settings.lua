@@ -46,6 +46,105 @@ return function(M)
         end
     end
 
+    ----------------------------------------------------------------------
+    -- File-backed fallback
+    --
+    -- An older client provides no saved-variable API at all: no
+    -- ShroudSetSavedVar, GetSavedVar, DeleteSavedVar or FlushSavedVars. Without
+    -- a fallback every setting would silently reset each session, and a tracker
+    -- whose whole purpose is remembering something across sessions would be
+    -- pointless there.
+    --
+    -- Values are written as a Lua literal and read back with load(), rather
+    -- than JSON, because that needs a serializer only -- no parser -- and the
+    -- host's own saved variables were historically Lua source for the same
+    -- reason.
+    ----------------------------------------------------------------------
+
+    local fileStore = nil     -- { account = {}, characters = { [name] = {} } }
+    local fileDirty = false
+
+    local function hostHasSavedVars()
+        return type(ShroudSetSavedVar) == "function"
+            and type(ShroudGetSavedVar) == "function"
+    end
+
+    local function filePath()
+        return M.env.luaFile("sotalua-settings-" .. M.env.slug() .. ".lua")
+    end
+
+    local function serialize(value, depth)
+        depth = (depth or 0) + 1
+        if depth > 12 then return "nil" end
+        local kind = type(value)
+        if kind == "string" then return string.format("%q", value) end
+        if kind == "number" or kind == "boolean" then return tostring(value) end
+        if kind ~= "table" then return "nil" end
+
+        local parts = {}
+        for _, key in ipairs(M.util.keysSorted(value)) do
+            local encodedKey
+            if type(key) == "string" then
+                encodedKey = "[" .. string.format("%q", key) .. "]"
+            elseif type(key) == "number" then
+                encodedKey = "[" .. tostring(key) .. "]"
+            end
+            if encodedKey then
+                parts[#parts + 1] = encodedKey .. "=" .. serialize(value[key], depth)
+            end
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+
+    local function loadFileStore()
+        if fileStore then return fileStore end
+        fileStore = { account = {}, characters = {} }
+
+        local path = filePath()
+        if not path then return fileStore end
+        local file = io.open(path, "r")
+        if not file then return fileStore end
+        local body = file:read("*a")
+        file:close()
+
+        local loader = load or loadstring
+        if not loader or not body or body == "" then return fileStore end
+        local ok, chunk = pcall(loader, body, "settings", "t", {})
+        if ok and chunk then
+            local decoded
+            ok, decoded = pcall(chunk)
+            if ok and type(decoded) == "table" then
+                fileStore.account = decoded.account or {}
+                fileStore.characters = decoded.characters or {}
+            end
+        end
+        return fileStore
+    end
+
+    local function fileScope(scope)
+        local store = loadFileStore()
+        if scope == "account" then return store.account end
+        local who = M.util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil)
+            or character or "unknown"
+        store.characters[who] = store.characters[who] or {}
+        return store.characters[who]
+    end
+
+    local function writeFileStore()
+        if not fileDirty or not fileStore then return true end
+        local path = filePath()
+        if not path then return false end   -- path not published yet; try later
+        local file = io.open(path, "w")
+        if not file then
+            M.log.warn("could not write settings to", path)
+            return false
+        end
+        file:write("return " .. serialize(fileStore) .. "\n")
+        file:close()
+        fileDirty = false
+        return true
+    end
+
     local function validKey(key)
         if type(key) ~= "string" or key == "" then return false, "key must be a non-empty string" end
         if #key > MAX_KEY then return false, "key longer than " .. MAX_KEY .. " characters" end
@@ -108,8 +207,10 @@ return function(M)
 
         local entry = schema[key]
         local stored
-        if ShroudGetSavedVar then
+        if hostHasSavedVars() then
             stored = M.env.try("settings.get:" .. key, ShroudGetSavedVar, key, scopeOf(key))
+        else
+            stored = fileScope(scopeOf(key))[key]
         end
 
         if stored == nil then
@@ -156,8 +257,11 @@ return function(M)
         loaded[key] = true
         dirty = true
 
-        if ShroudSetSavedVar then
+        if hostHasSavedVars() then
             M.env.try("settings.set:" .. key, ShroudSetSavedVar, key, value, scopeOf(key))
+        else
+            fileScope(scopeOf(key))[key] = M.util.deepCopy(value)
+            fileDirty = true
         end
         return true
     end
@@ -174,8 +278,11 @@ return function(M)
         cache[key] = nil
         loaded[key] = nil
         dirty = true
-        if ShroudDeleteSavedVar then
+        if type(ShroudDeleteSavedVar) == "function" then
             M.env.try("settings.delete:" .. key, ShroudDeleteSavedVar, key, scopeOf(key))
+        else
+            fileScope(scopeOf(key))[key] = nil
+            fileDirty = true
         end
         return true
     end
@@ -190,9 +297,13 @@ return function(M)
     --- Force the host to write. Core wires this to logout and disable, so
     --- plugins rarely need to call it directly.
     function S.flush()
+        if not hostHasSavedVars() then
+            dirty = false
+            return writeFileStore()
+        end
         if not dirty then return true end
         dirty = false
-        if not ShroudFlushSavedVars then return true end
+        if type(ShroudFlushSavedVars) ~= "function" then return true end
         local ok = M.env.try("settings.flush", ShroudFlushSavedVars)
         if ok == false then
             M.log.warn("saved variables were not written; a value may exceed the host size limit")

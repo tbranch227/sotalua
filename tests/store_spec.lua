@@ -218,6 +218,49 @@ describe("store", function()
         assert_that.contains(readAll() or "", '"type":"session"')
     end)
 
+    it("persists settings to a file when the host has no saved-var API", function()
+        -- The live client provides no ShroudSetSavedVar at all. Without this
+        -- fallback every setting resets each session, which makes a tracker
+        -- whose entire purpose is remembering things across sessions useless.
+        _G.ShroudSetSavedVar = nil
+        _G.ShroudGetSavedVar = nil
+        _G.ShroudDeleteSavedVar = nil
+        _G.ShroudFlushSavedVars = nil
+
+        M.settings.define({ best = { default = 0 }, theme = { default = "dark", scope = "account" } })
+        M.settings.set("best", 4242)
+        M.settings.set("theme", "light")
+        assert_that.is_true(M.settings.flush())
+
+        local file = io.open(SCRATCH .. "sotalua-settings-t.lua", "r")
+        assert_that.truthy(file, "no settings file was written")
+        local body = file:read("*a")
+        file:close()
+        assert_that.contains(body, "4242")
+        assert_that.contains(body, "light")
+
+        -- A fresh module must read it back, per character and per account.
+        M.settings.clearCache()
+        M.settings.define({ best = { default = 0 }, theme = { default = "dark", scope = "account" } })
+        assert_that.equal(4242, M.settings.get("best"))
+        assert_that.equal("light", M.settings.get("theme"))
+    end)
+
+    it("keeps file-backed settings separate per character", function()
+        _G.ShroudSetSavedVar = nil
+        _G.ShroudGetSavedVar = nil
+
+        M.settings.define({ best = { default = 0 } })
+        M.settings.set("best", 100)
+        M.settings.flush()
+
+        H.host.switchCharacter("Second Avatar")
+        M.settings.clearCache()
+        M.settings.define({ best = { default = 0 } })
+        assert_that.equal(0, M.settings.get("best"),
+            "the second character inherited the first one's file-backed value")
+    end)
+
     it("reads its own tail back", function()
         for i = 1, 5 do M.store.append("tick", { i = i }) end
         M.store.flush()

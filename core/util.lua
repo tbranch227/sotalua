@@ -230,6 +230,29 @@ return function(_M)
         return out
     end
 
+    --- Strip the client's inline markup and channel prefix from a chat line.
+    --
+    -- Combat text arrives dressed for display, not for parsing:
+    --
+    --   " to everyone [CombatSelf]: Zealot attacks Practice Dummy and hits,
+    --    dealing [FFEB04]64 points of critical damage[-] from Rapid Fire."
+    --
+    -- The [RRGGBB] and [-] pairs are colour markup, and they land in the middle
+    -- of the sentence -- between "dealing" and the number -- so a pattern
+    -- written against the visible text cannot match. The leading routing prefix
+    -- would also be captured as the attacker's name.
+    function U.stripMarkup(message)
+        if type(message) ~= "string" then return "" end
+        local out = message
+            :gsub("%[%x%x%x%x%x%x%]", "")   -- colour open, e.g. [FFEB04]
+            :gsub("%[%x%x%x%x%x%x%x%x%]", "")
+            :gsub("%[%-%]", "")             -- colour close
+        -- Drop a leading "... [Channel]: " routing prefix, but only up to the
+        -- first one: a player could type "]: " in a message body.
+        out = out:gsub("^%s*[^%[%]]*%[%w+%]:%s*", "")
+        return U.trim(out)
+    end
+
     function U.trim(s)
         return (tostring(s):gsub("^%s+", ""):gsub("%s+$", ""))
     end

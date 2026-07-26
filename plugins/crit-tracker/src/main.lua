@@ -65,9 +65,16 @@ return function(Core)
     --
     -- Lua patterns, not regex: no alternation, no quantified groups. `captures`
     -- names each capture in order.
+    -- Names are matched with a restricted character class rather than ".-", so
+    -- a match cannot begin inside the channel prefix: "[CombatSelf]:" contains
+    -- brackets and a colon, none of which the class admits, so the attacker
+    -- capture starts at the real name even if stripMarkup missed the prefix.
+    local NAME = "[%a][%w%s'%-%.]-"
+
     local PATTERNS = {
         {
-            pattern = "^(.-) attacks (.-) and hits, dealing (%d+) points? of critical damage from (.+)$",
+            pattern = "(" .. NAME .. ") attacks (" .. NAME
+                .. ") and hits, dealing (%d+) points? of critical damage from (.+)$",
             captures = { "attacker", "target", "damage", "skill" },
         },
         -- Fallback for a phrasing that omits the attacker clause entirely. Only
@@ -85,7 +92,9 @@ return function(Core)
     local KEYWORDS = { "critical", "crit " }
 
     local function looksLikeCrit(message)
-        local lowered = message:lower()
+        -- Markup can sit inside the phrase itself ("critical damage[-]"), so
+        -- the cheap keyword test runs on stripped text too.
+        local lowered = util.stripMarkup(message):lower()
         for _, keyword in ipairs(KEYWORDS) do
             if lowered:find(keyword, 1, true) then return true end
         end
@@ -106,13 +115,16 @@ return function(Core)
     -- Returns a table { skill, damage, attacker, target } or nil. A custom
     -- pattern added at runtime is assumed to capture skill then damage, which
     -- is the shape the command documents.
-    local function parse(message)
+    local function parse(raw)
+        -- Colour markup lands between "dealing" and the number, so parsing has
+        -- to happen against the stripped text, not what the player sees.
+        local message = util.stripMarkup(raw)
         local hasAttacker = message:find(" attacks ", 1, true) ~= nil
 
         local candidates = {}
         for _, entry in ipairs(PATTERNS) do candidates[#candidates + 1] = entry end
-        for _, raw in ipairs(Core.settings.get("extraPatterns") or {}) do
-            candidates[#candidates + 1] = { pattern = raw, captures = { "skill", "damage" } }
+        for _, custom in ipairs(Core.settings.get("extraPatterns") or {}) do
+            candidates[#candidates + 1] = { pattern = custom, captures = { "skill", "damage" } }
         end
 
         for _, entry in ipairs(candidates) do

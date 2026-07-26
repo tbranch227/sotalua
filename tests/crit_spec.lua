@@ -8,6 +8,19 @@
 
 local H = dofile((os.getenv("SOTALUA_ROOT") or "./") .. "tests/helper.lua")
 
+-- Captured verbatim from the live client, markup and channel prefix intact.
+-- Colour tags sit *inside* the sentence -- between "dealing" and the number --
+-- which is exactly why a pattern written against the visible text fails.
+local LIVE = {
+    crit = " to everyone [CombatSelf]: Zealot attacks Practice Dummy and hits,"
+        .. " dealing [FFEB04]240 points of critical damage[-] from Multi Shot.",
+    critBow = " to everyone [CombatSelf]: Zealot attacks Practice Dummy and hits,"
+        .. " dealing [FFEB04]172 points of critical damage[-] from Bow.",
+    normal = " to everyone [CombatSelf]: Zealot attacks Practice Dummy and hits,"
+        .. " dealing 48 points of damage from Disabling Shot.",
+    system = " to everyone [System]: Elrich Skychosen is now online.",
+}
+
 -- Real lines, exactly as the game printed them.
 local REAL = {
     "Zealot attacks Elite Obsidian Elf Archer and hits, dealing 347 points of critical damage from Lightning Storm.",
@@ -68,6 +81,41 @@ describe("crit-tracker", function()
             assert_that.equal(expected[index][3], hit.target)
             assert_that.equal("Zealot", hit.attacker)
         end
+    end)
+
+    it("parses a live line through its colour markup and channel prefix", function()
+        build()
+        local hit = plugin.parse(LIVE.crit)
+        assert_that.truthy(hit, "the markup defeated the parser")
+        assert_that.equal("Multi Shot", hit.skill)
+        assert_that.equal(240, hit.damage)
+        -- The prefix must not be captured as the attacker.
+        assert_that.equal("Zealot", hit.attacker)
+        assert_that.equal("Practice Dummy", hit.target)
+    end)
+
+    it("records a live critical end to end", function()
+        build()
+        H.host.chat("CombatSelf", "", LIVE.critBow)
+        H.host.chat("CombatSelf", "", LIVE.crit)
+
+        assert_that.equal(172, plugin.records("player")["Bow"].damage)
+        assert_that.equal(240, plugin.records("player")["Multi Shot"].damage)
+        assert_that.equal(2, plugin.state.parsed)
+        assert_that.equal(0, plugin.state.others, "the prefix was read as another player")
+    end)
+
+    it("ignores a non-critical hit in the same format", function()
+        build()
+        H.host.chat("CombatSelf", "", LIVE.normal)
+        assert_that.nil_(plugin.records("player")["Disabling Shot"])
+        assert_that.equal(0, plugin.state.parsed)
+    end)
+
+    it("ignores an unrelated system line", function()
+        build()
+        assert_that.is_false(plugin.looksLikeCrit(LIVE.system))
+        assert_that.nil_(plugin.parse(LIVE.system))
     end)
 
     it("handles the singular 'point'", function()
