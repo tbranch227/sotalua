@@ -373,6 +373,39 @@ describe("crit-tracker", function()
         end)
     end)
 
+    it("prints samples by itself while nothing is parsing", function()
+        -- On a client where /lua <function> does not work, the manual capture
+        -- command is unreachable, so this is the only route to a real sample.
+        build()
+        H.host.chat("Say", "Bob", "hello there")
+        H.host.chat("Combat", "", "something unrecognised happened")
+
+        assert_that.is_true(H.host.consoleContains("[sample 1/25]"))
+        assert_that.is_true(H.host.consoleContains("hello there"))
+        assert_that.equal(2, plugin.state.autoCaptured)
+    end)
+
+    it("stops sampling for good once a critical parses", function()
+        build()
+        H.host.chat("Say", "Bob", "noise")
+        assert_that.equal(1, plugin.state.autoCaptured)
+
+        H.host.chat("Combat", "", REAL[4])          -- parses
+        local after = plugin.state.autoCaptured
+        H.host.chat("Say", "Bob", "more noise")
+        H.host.chat("Say", "Bob", "yet more")
+
+        assert_that.equal(after, plugin.state.autoCaptured,
+            "kept sampling after the parser was proven to work")
+    end)
+
+    it("caps the samples it prints", function()
+        build()
+        for i = 1, 60 do H.host.chat("Say", "Bob", "line " .. i) end
+        assert_that.equal(25, plugin.state.autoCaptured)
+        assert_that.equal(60, plugin.state.lines)
+    end)
+
     it("logs every line verbatim in capture mode", function()
         build()
         M.settings.set("capture", true)

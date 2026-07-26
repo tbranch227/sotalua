@@ -284,6 +284,25 @@ return function(Core)
         if count == 0 then log.say("  none registered") end
     end)
 
+    -- Every other feature of this addon is a command, and /lua <function> does
+    -- not work on every client, which would leave it completely inert on
+    -- exactly the builds whose API is most worth inspecting. So the export runs
+    -- by itself shortly after loading.
+    --
+    -- Delayed rather than immediate: ShroudLuaPath is not published while the
+    -- addon body runs, so an export at start would have nowhere to write.
+    addon.onStart(function()
+        addon.every("autoExport", 5, function()
+            Core.timers.cancel("autoExport")
+            if not env.luaFile("api-export.txt") then
+                log.info("cannot export: the host has not published its Lua path")
+                return
+            end
+            local exporter = _G[Core.addon.commandGlobal("api-probe", "export")]
+            if exporter then exporter() end
+        end)
+    end)
+
     addon.onStart(function()
         log.info(env.describe())
         log.info("commands: /lua _ApiProbe_api | _stats | _buffs | _target | _party"

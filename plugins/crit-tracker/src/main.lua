@@ -41,9 +41,13 @@ return function(Core)
     -- Declared before the parsing helpers, which read and write them. A local
     -- is not in scope until its declaring statement completes, so a helper
     -- defined above this line would silently reach for a global instead.
+    -- How many chat lines to print verbatim while nothing is parsing. Enough to
+    -- catch a combat exchange, few enough not to flood the window.
+    local AUTO_CAPTURE_LINES = 25
+
     local view = { rows = {} }
     local state = { lastAlert = nil, parsed = 0, captured = 0, unmatched = 0,
-                    others = 0, pets = 0, lines = 0, petName = nil }
+                    others = 0, pets = 0, lines = 0, petName = nil, autoCaptured = 0 }
 
     ----------------------------------------------------------------------
     -- Parsing
@@ -337,6 +341,28 @@ return function(Core)
         if state.lines == 1 then
             log.info(string.format("chat is reaching this addon (type=%q). Combat"
                 .. " lines will be parsed for criticals.", tostring(inputType)))
+        end
+
+        -- Automatic capture, for a client where /lua <function> does not work
+        -- and the manual capture command is therefore unreachable.
+        --
+        -- Self-limiting in both directions: it stops after AUTO_CAPTURE_LINES,
+        -- and it stops permanently the moment anything parses. So it is loud
+        -- exactly while the parser is failing and silent once it works.
+        if state.parsed == 0 and state.pets == 0
+            and state.autoCaptured < AUTO_CAPTURE_LINES then
+            state.autoCaptured = state.autoCaptured + 1
+            log.say(string.format("[sample %d/%d] type=%q | %s",
+                state.autoCaptured, AUTO_CAPTURE_LINES, tostring(inputType), message))
+            Core.store.append("chat", {
+                inputType = tostring(inputType or ""),
+                source = tostring(source or ""),
+                line = message,
+            })
+            if state.autoCaptured == AUTO_CAPTURE_LINES then
+                log.say("that is enough samples; send a combat line to have the"
+                    .. " pattern corrected. No more will be printed.")
+            end
         end
 
         if Core.settings.get("capture") then
