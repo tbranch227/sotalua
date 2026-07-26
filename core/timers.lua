@@ -18,6 +18,7 @@ return function(M)
     local timers = {}         -- name -> { fn, period, repeating }
     local hostName = nil      -- the global name registered with the host
     local pumpPeriod = nil
+    local frameDriven = nil   -- unsubscribe fn when driven from ShroudOnUpdate
 
     local function now()
         return ShroudTime or 0
@@ -41,18 +42,36 @@ return function(M)
     --
     -- `globalName` must be unique across every addon the player has enabled;
     -- the bundler derives it from the plugin slug.
+    --
+    -- Falls back to the frame loop when the host has no working periodic. An
+    -- older client may not provide ShroudRegisterPeriodic at all, and without a
+    -- fallback everything built on timers -- inventory scanning, saved-variable
+    -- flushing, deferred work -- would silently never run. Frame-driven timers
+    -- are less accurate, since they cannot fire while the game is not drawing,
+    -- but that is far better than not firing.
     function T.install(globalName, tickPeriod)
         hostName = globalName
         pumpPeriod = math.max(tickPeriod or 0.25, MIN_PERIOD)
         _G[hostName] = M.env.protect("timers.pump", pump)
-        if ShroudRegisterPeriodic then
-            local ok = M.env.try("timers.install", ShroudRegisterPeriodic,
-                hostName, hostName, pumpPeriod, true)
-            if ok == false then
-                M.log.warn("could not register the timer pump; periodic work is disabled")
-            end
+
+        local registered = false
+        if type(ShroudRegisterPeriodic) == "function" then
+            registered = M.env.try("timers.install", ShroudRegisterPeriodic,
+                hostName, hostName, pumpPeriod, true) ~= false
+        end
+
+        if not registered then
+            M.log.info("no periodic timer on this client; running timers from"
+                .. " the frame loop instead")
+            frameDriven = M.events.on("ShroudOnUpdate", T.throttle(pumpPeriod, pump),
+                "timers.framePump")
         end
         return T
+    end
+
+    --- True when timers are being driven by ShroudOnUpdate rather than the host.
+    function T.isFrameDriven()
+        return frameDriven ~= nil
     end
 
     --- Schedule `fn` every `period` seconds.
@@ -98,6 +117,10 @@ return function(M)
     --- disabled addon leaves no periodic behind.
     function T.uninstall()
         timers = {}
+        if frameDriven then
+            frameDriven()
+            frameDriven = nil
+        end
         if hostName then
             if ShroudRemovePeriodic then
                 M.env.try("timers.uninstall", ShroudRemovePeriodic, hostName)

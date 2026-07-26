@@ -162,6 +162,29 @@ describe("plugin lifecycle", function()
         end)
     end
 
+    for _, slug in ipairs(PLUGINS) do
+        it(slug .. " still does its periodic work with no host timer", function()
+            -- Suspected shape of the live client. Without the frame-loop
+            -- fallback every timer-driven feature would go quiet with no error
+            -- to show for it, which is the worst kind of failure.
+            local M = H.bootstrap({ apiVersion = 0, publishApiVersion = false,
+                                    world = populatedWorld })
+            _G.ShroudRegisterPeriodic = nil
+            _G.ShroudRemovePeriodic = nil
+
+            H.plugin(slug, M)
+            H.installHandlers(M)
+            H.host.start()
+            H.host.frames(300, 1 / 30)   -- ten seconds
+            H.host.disable()
+
+            for _, line in ipairs(H.host.console()) do
+                assert_that.falsy(line:find("ERROR", 1, true),
+                    slug .. " errored without a host timer: " .. line)
+            end
+        end)
+    end
+
     it("registers no more than one periodic per plugin", function()
         -- ShroudRegisterPeriodic resolves a global by name, so a plugin that
         -- minted one global per timer would flood the shared environment.

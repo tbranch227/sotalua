@@ -369,6 +369,47 @@ describe("timers", function()
         assert_that.truthy(calls >= 3, "throttle blocked too much: " .. calls)
     end)
 
+    it("drives timers from the frame loop when the host has no periodic", function()
+        -- An older client may not provide ShroudRegisterPeriodic at all.
+        -- Without a fallback, everything built on timers would silently never
+        -- run: inventory scans, saved-variable flushes, deferred work.
+        _G.ShroudRegisterPeriodic = nil
+        _G.ShroudRemovePeriodic = nil
+
+        M.timers.install("_Test_pump", 0.05)
+        assert_that.is_true(M.timers.isFrameDriven())
+
+        local ticks = 0
+        M.timers.every("tick", 0.5, function() ticks = ticks + 1 end)
+        H.installHandlers(M)
+
+        H.host.frames(180, 1 / 60)   -- three seconds of frames
+        assert_that.truthy(ticks >= 4, "frame-driven timer fired only " .. ticks .. " times")
+    end)
+
+    it("prefers the host periodic when it exists", function()
+        M.timers.install("_Test_pump", 0.05)
+        assert_that.is_false(M.timers.isFrameDriven())
+
+        local registered = {}
+        for name in ShroudListPeriodics() do registered[#registered + 1] = name end
+        assert_that.same({ "_Test_pump" }, registered)
+    end)
+
+    it("stops a frame-driven pump on uninstall", function()
+        _G.ShroudRegisterPeriodic = nil
+        M.timers.install("_Test_pump", 0.05)
+        local ticks = 0
+        M.timers.every("tick", 0.1, function() ticks = ticks + 1 end)
+        H.installHandlers(M)
+
+        H.host.frames(30, 1 / 60)
+        local before = ticks
+        M.timers.uninstall()
+        H.host.frames(120, 1 / 60)
+        assert_that.equal(before, ticks, "the frame pump kept running after uninstall")
+    end)
+
     it("removes its host registration on uninstall", function()
         M.timers.install("_Test_pump", 0.1)
         M.timers.uninstall()
