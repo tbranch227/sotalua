@@ -27,6 +27,7 @@ return function(Core)
         settings = {
             windows = { default = {} },
             records = { default = {} },        -- skill -> best hit
+            characterName = { default = "" },  -- override for combat-log matching
             extraPatterns = { default = {}, scope = "account" },
             capture = { default = false },
             alertSeconds = { default = 4, scope = "account" },
@@ -38,20 +39,31 @@ return function(Core)
     -- Parsing
     ----------------------------------------------------------------------
 
-    -- Each entry captures a skill name and a damage number. `order` says which
-    -- capture is which, since the two appear in either order depending on
-    -- phrasing. Lua patterns, not regex: no alternation, no quantified groups.
+    -- The confirmed client format, captured from a live game:
+    --
+    --   Zealot attacks Death Metal Slime and hits, dealing 254 points of
+    --   critical damage from Chaos Bolt.
+    --
+    -- Note "1 point" versus "254 points", and that the line names the attacker
+    -- first. That last detail matters more than it looks: the same message is
+    -- printed for everyone in the area, so a party member's critical would be
+    -- filed as yours unless the attacker is checked.
+    --
+    -- Lua patterns, not regex: no alternation, no quantified groups. `captures`
+    -- names each capture in order.
     local PATTERNS = {
-        -- "Your Fireball critically hits Obsidian Wolf for 342 damage"
-        { pattern = "[Yy]our%s+(.-)%s+critically%s+hits?%s+.-%s+for%s+(%d+)", order = "skill,damage" },
-        -- "You critically hit Obsidian Wolf with Fireball for 342 damage"
-        { pattern = "critically%s+hit%s+.-%s+with%s+(.-)%s+for%s+(%d+)", order = "skill,damage" },
-        -- "Critical Hit! Fireball deals 342 damage"
-        { pattern = "[Cc]ritical%s+[Hh]it!?%s*(.-)%s+deals%s+(%d+)", order = "skill,damage" },
-        -- "You hit Obsidian Wolf with Fireball for 342 damage (Critical)"
-        { pattern = "with%s+(.-)%s+for%s+(%d+).-[Cc]ritical", order = "skill,damage" },
-        -- "342 critical damage with Fireball"
-        { pattern = "(%d+)%s+critical%s+damage%s+with%s+(.+)", order = "damage,skill" },
+        {
+            pattern = "^(.-) attacks (.-) and hits, dealing (%d+) points? of critical damage from (.+)$",
+            captures = { "attacker", "target", "damage", "skill" },
+        },
+        -- Fallback for a phrasing that omits the attacker clause entirely. Only
+        -- tried when the line has no " attacks " in it, so a line naming an
+        -- attacker we failed to parse is skipped rather than misattributed.
+        {
+            pattern = "dealing (%d+) points? of critical damage from (.+)$",
+            captures = { "damage", "skill" },
+            onlyWithoutAttacker = true,
+        },
     }
 
     -- Cheap rejection before running any pattern. ShroudOnConsoleInput fires
@@ -75,29 +87,70 @@ return function(Core)
         return name
     end
 
-    --- Try every pattern, built-in then user-supplied. Returns skill, damage.
+    --- Try every pattern, built-in then user-supplied.
+    --
+    -- Returns a table { skill, damage, attacker, target } or nil. A custom
+    -- pattern added at runtime is assumed to capture skill then damage, which
+    -- is the shape the command documents.
     local function parse(message)
+        local hasAttacker = message:find(" attacks ", 1, true) ~= nil
+
         local candidates = {}
         for _, entry in ipairs(PATTERNS) do candidates[#candidates + 1] = entry end
         for _, raw in ipairs(Core.settings.get("extraPatterns") or {}) do
-            candidates[#candidates + 1] = { pattern = raw, order = "skill,damage" }
+            candidates[#candidates + 1] = { pattern = raw, captures = { "skill", "damage" } }
         end
 
         for _, entry in ipairs(candidates) do
-            local ok, first, second = pcall(string.match, message, entry.pattern)
-            if ok and first and second then
-                local skill, damage
-                if entry.order == "damage,skill" then
-                    damage, skill = tonumber(first), tidySkill(second)
-                else
-                    skill, damage = tidySkill(first), tonumber(second)
-                end
-                if skill and damage and damage > 0 then
-                    return skill, damage
+            if not (entry.onlyWithoutAttacker and hasAttacker) then
+                local ok, a, b, c, d = pcall(string.match, message, entry.pattern)
+                if ok and a then
+                    local found = { a, b, c, d }
+                    local fields = {}
+                    for index, name in ipairs(entry.captures) do
+                        fields[name] = found[index]
+                    end
+
+                    local damage = tonumber(fields.damage)
+                    local skill = tidySkill(fields.skill)
+                    if skill and damage and damage > 0 then
+                        return {
+                            skill = skill,
+                            damage = damage,
+                            attacker = fields.attacker and util.trim(fields.attacker) or nil,
+                            target = fields.target and util.trim(fields.target) or nil,
+                        }
+                    end
                 end
             end
         end
         return nil
+    end
+
+    --- Is this line describing the tracked character's own hit?
+    --
+    -- The combat log is broadcast for everyone nearby, so without this every
+    -- party member's critical would land in your records. An override exists
+    -- because ShroudGetPlayerName returns the display name, which need not be
+    -- exactly the name the combat log prints.
+    local function isSelf(attacker)
+        if not attacker or attacker == "" then
+            -- No attacker in the line: the fallback pattern only runs when the
+            -- line named nobody, so there is no one else it could belong to.
+            return true
+        end
+
+        local override = Core.settings.get("characterName")
+        local mine = (type(override) == "string" and override ~= "")
+            and override
+            or util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil)
+        if not mine then return false end
+
+        local a, b = attacker:lower(), mine:lower()
+        if a == b then return true end
+        -- Tolerate one being a leading part of the other ("Zealot" against
+        -- "Zealot Ravenmoor"), but only on a word boundary.
+        return a:sub(1, #b + 1) == b .. " " or b:sub(1, #a + 1) == a .. " "
     end
 
     ----------------------------------------------------------------------
@@ -105,7 +158,7 @@ return function(Core)
     ----------------------------------------------------------------------
 
     local view = { rows = {} }
-    local state = { lastAlert = nil, parsed = 0, captured = 0, unmatched = 0 }
+    local state = { lastAlert = nil, parsed = 0, captured = 0, unmatched = 0, others = 0 }
 
     local function records()
         return Core.settings.get("records") or {}
@@ -151,16 +204,20 @@ return function(Core)
     end
 
     --- Record a crit, alerting when it beats the stored best.
-    local function record(skill, damage, message)
+    local function record(hit, message)
+        local skill, damage = hit.skill, hit.damage
         if damage < (Core.settings.get("minimumDamage") or 1) then return false end
 
         local scene = poll.scene()
-        local target = poll.target()
+        -- The target named in the line is authoritative: poll.target() is
+        -- whatever is selected now, which during a fight is often something
+        -- else by the time the message arrives.
+        local target = hit.target or (poll.target() and poll.target().name) or ""
 
         Core.store.append("crit", {
             skill = skill, damage = damage,
             scene = scene and scene.name or "",
-            target = target and target.name or "",
+            target = target,
             line = message,
         })
 
@@ -174,7 +231,7 @@ return function(Core)
                 damage = damage,
                 at = ShroudServerTime or "",
                 scene = scene and scene.name or "",
-                target = target and target.name or "",
+                target = target,
             }
         end)
 
@@ -209,8 +266,8 @@ return function(Core)
 
         if not looksLikeCrit(message) then return end
 
-        local skill, damage = parse(message)
-        if not skill then
+        local hit = parse(message)
+        if not hit then
             state.unmatched = state.unmatched + 1
             -- Worth surfacing: a line that mentions a critical but matches no
             -- pattern is exactly the sample needed to fix the pattern.
@@ -218,8 +275,15 @@ return function(Core)
             return
         end
 
+        if not isSelf(hit.attacker) then
+            -- Someone else's critical. The combat log is broadcast to everyone
+            -- nearby, so this is the common case in a party.
+            state.others = state.others + 1
+            return
+        end
+
         state.parsed = state.parsed + 1
-        record(skill, damage, message)
+        record(hit, message)
     end)
 
     ----------------------------------------------------------------------
@@ -246,8 +310,8 @@ return function(Core)
             ui.setText(view.rows[1] or view.status, "no records yet")
         end
 
-        ui.setText(view.status, string.format("%d parsed, %d unmatched%s",
-            state.parsed, state.unmatched,
+        ui.setText(view.status, string.format("%d mine, %d others, %d unmatched%s",
+            state.parsed, state.others, state.unmatched,
             Core.settings.get("capture") and "  [CAPTURING]" or ""))
     end
 
@@ -338,12 +402,30 @@ return function(Core)
             return
         end
         log.say("keyword match: " .. tostring(looksLikeCrit(message)))
-        local skill, damage = parse(message)
-        if skill then
-            log.say(string.format("parsed skill=%q damage=%d", skill, damage))
+        local hit = parse(message)
+        if hit then
+            log.say(string.format("skill=%q damage=%d attacker=%q target=%q",
+                hit.skill, hit.damage, hit.attacker or "", hit.target or ""))
+            log.say("counts as mine: " .. tostring(isSelf(hit.attacker)))
         else
             log.say("no pattern matched; add one with /lua _CritTracker_pattern")
         end
+    end)
+
+    --- Show, and optionally set, the name matched against the combat log.
+    addon.command("whoami", function(...)
+        local override = util.trim(table.concat({ ... }, " "))
+        if override ~= "" then
+            Core.settings.set("characterName", override)
+            log.say("combat log lines will be matched against " .. override)
+            return
+        end
+        local detected = util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), "(unknown)")
+        local stored = Core.settings.get("characterName")
+        log.say("ShroudGetPlayerName reports: " .. detected)
+        log.say("override: " .. ((stored ~= "" and stored) or "(none)"))
+        log.say("if other players' criticals are being recorded as yours,"
+            .. " set it with /lua _CritTracker_whoami <YourName>")
     end)
 
     --- Add a Lua pattern capturing (skill, damage), in that order.
@@ -382,7 +464,7 @@ return function(Core)
     end)
 
     return {
-        view = view, state = state, parse = parse, record = record,
+        view = view, state = state, parse = parse, record = record, isSelf = isSelf,
         records = records, sortedRecords = sortedRecords, looksLikeCrit = looksLikeCrit,
     }
 end
