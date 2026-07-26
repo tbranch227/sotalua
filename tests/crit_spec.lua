@@ -207,8 +207,8 @@ describe("crit-tracker", function()
 
         -- A weaker hit is that character's own first record, not a failed
         -- attempt on somebody else's.
-        H.host.chat("Combat", "",
-            "Second Avatar attacks Death Metal Slime and hits, dealing 12 points of critical damage from Lightning Storm.")
+        H.host.chat("Combat", "", "Second Avatar attacks Death Metal Slime and hits,"
+            .. " dealing 12 points of critical damage from Lightning Storm.")
         assert_that.equal(12, other.records()["Lightning Storm"].damage)
     end)
 
