@@ -25,12 +25,28 @@ describe("store", function()
         os.execute("rm -rf " .. SCRATCH)
     end)
 
-    local function readAll()
-        local file = io.open(SCRATCH .. "sotalua-test.jsonl", "r")
+    local function readFile(name)
+        local file = io.open(SCRATCH .. name, "r")
         if not file then return nil end
         local body = file:read("*a")
         file:close()
         return body
+    end
+
+    -- The default mock character is "Testcharacter".
+    local function readAll()
+        return readFile("sotalua-test-testcharacter.jsonl")
+    end
+
+    local function listFiles()
+        local names = {}
+        local pipe = io.popen("ls " .. SCRATCH .. " 2>/dev/null")
+        if pipe then
+            for line in pipe:lines() do names[#names + 1] = line end
+            pipe:close()
+        end
+        table.sort(names)
+        return names
     end
 
     it("writes one self-contained JSON object per line", function()
@@ -131,6 +147,56 @@ describe("store", function()
         assert_that.truthy(stats.dropped > 0, "nothing was dropped")
     end)
 
+    it("gives each character its own file", function()
+        -- One install, many characters. A shared file would let a busy
+        -- character rotate away another's history.
+        M.store.append("a", { n = 1 })
+        M.store.flush()
+
+        H.host.switchCharacter("Second Avatar")
+        M.store.append("b", { n = 2 })
+        M.store.flush()
+
+        assert_that.same(
+            { "sotalua-test-second-avatar.jsonl", "sotalua-test-testcharacter.jsonl" },
+            listFiles())
+        assert_that.contains(readFile("sotalua-test-testcharacter.jsonl"), '"type":"a"')
+        assert_that.contains(readFile("sotalua-test-second-avatar.jsonl"), '"type":"b"')
+        assert_that.falsy(readFile("sotalua-test-second-avatar.jsonl"):find('"type":"a"', 1, true))
+    end)
+
+    it("flushes queued events to the old file before switching", function()
+        M.store.append("belongs-to-first", {})    -- queued, not yet written
+        H.host.switchCharacter("Second Avatar")
+        M.store.append("belongs-to-second", {})
+        M.store.flush()
+
+        assert_that.contains(readFile("sotalua-test-testcharacter.jsonl"), "belongs-to-first")
+        assert_that.contains(readFile("sotalua-test-second-avatar.jsonl"), "belongs-to-second")
+    end)
+
+    it("attributes a record written at logout to the character who earned it", function()
+        -- ShroudGetPlayerName reports no player once logout has begun, and the
+        -- session summary is written exactly then. Reading the name at write
+        -- time would file it under "unknown".
+        M.store.append("warmup", {})
+        H.host.world.player.name = nil            -- logging out
+        M.store.append("session", { seconds = 60 })
+        M.store.flush()
+
+        local body = readFile("sotalua-test-testcharacter.jsonl")
+        assert_that.truthy(body, "the record went to the wrong file")
+        assert_that.contains(body, '"char":"Testcharacter"')
+        assert_that.falsy(body:find('"char":"unknown"', 1, true))
+    end)
+
+    it("sanitises a character name into a filename", function()
+        H.host.switchCharacter("Sir Reginald The Third")
+        M.store.append("x", {})
+        M.store.flush()
+        assert_that.contains(listFiles(), "sotalua-test-sir-reginald-the-third.jsonl")
+    end)
+
     it("rotates the file once it passes its size cap", function()
         M.store.configure({ name = "test", maxBytes = 512 })
         for i = 1, 60 do
@@ -140,7 +206,7 @@ describe("store", function()
         M.store.append("after", {})
         M.store.flush()
 
-        local rotated = io.open(SCRATCH .. "sotalua-test.1.jsonl", "r")
+        local rotated = io.open(SCRATCH .. "sotalua-test-testcharacter.1.jsonl", "r")
         assert_that.truthy(rotated, "no rotated generation was created")
         rotated:close()
         assert_that.contains(readAll(), '"type":"after"')

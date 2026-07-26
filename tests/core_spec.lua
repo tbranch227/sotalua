@@ -257,6 +257,33 @@ describe("settings", function()
         assert_that.is_false(M.settings.set("fn", function() end))
     end)
 
+    it("does not serve one character's values to the next", function()
+        -- The host swaps which file backs the character scope when a player
+        -- logs in as somebody else, but an in-memory cache would keep serving
+        -- the previous values and then write them back under the new name.
+        M.settings.define({ best = { default = 0 } })
+        M.settings.set("best", 500)
+        assert_that.equal(500, M.settings.get("best"))
+
+        H.host.switchCharacter("Second Avatar")
+        assert_that.equal(0, M.settings.get("best"),
+            "the new character inherited a cached value")
+
+        M.settings.set("best", 12)
+        assert_that.equal(12, M.settings.get("best"))
+
+        -- And the original is untouched underneath.
+        H.host.switchCharacter("Testcharacter")
+        assert_that.equal(500, M.settings.get("best"))
+    end)
+
+    it("keeps account-scoped values across a character switch", function()
+        M.settings.define({ shared = { default = "x", scope = "account" } })
+        M.settings.set("shared", "kept")
+        H.host.switchCharacter("Second Avatar")
+        assert_that.equal("kept", M.settings.get("shared"))
+    end)
+
     it("flushes on logout and on disable", function()
         M.settings.define({ n = { default = 0 } })
         M.settings.install()

@@ -190,6 +190,46 @@ describe("crit-tracker", function()
         assert_that.equal(347, reloaded.records()["Lightning Storm"].damage)
     end)
 
+    it("keeps each character's records separate", function()
+        -- One install serves any number of characters, and a personal best
+        -- belongs to a build, not to the machine.
+        build()
+        H.host.chat("Combat", "", REAL[1])   -- Zealot: Lightning Storm 347
+        assert_that.equal(347, plugin.records()["Lightning Storm"].damage)
+
+        H.host.switchCharacter("Second Avatar")
+        local other = H.plugin("crit-tracker", M)
+        H.installHandlers(M)
+        H.host.start()
+
+        assert_that.nil_(other.records()["Lightning Storm"],
+            "the new character inherited the previous one's records")
+
+        -- A weaker hit is that character's own first record, not a failed
+        -- attempt on somebody else's.
+        H.host.chat("Combat", "",
+            "Second Avatar attacks Death Metal Slime and hits, dealing 12 points of critical damage from Lightning Storm.")
+        assert_that.equal(12, other.records()["Lightning Storm"].damage)
+    end)
+
+    it("keeps custom patterns shared across characters", function()
+        -- Patterns describe the client's text format, not the character, so
+        -- they are account-scoped and must survive a switch.
+        build()
+        M.settings.update("extraPatterns", function(list)
+            list[#list + 1] = "CRIT >> (.-) >> (%d+)"
+        end)
+
+        H.host.switchCharacter("Second Avatar")
+        local other = H.plugin("crit-tracker", M)
+        H.installHandlers(M)
+        H.host.start()
+
+        local hit = other.parse("CRIT >> Whirlwind >> 50")
+        assert_that.truthy(hit, "an account-scoped pattern was lost on switching")
+        assert_that.equal("Whirlwind", hit.skill)
+    end)
+
     it("accepts a custom pattern at runtime", function()
         build()
         assert_that.nil_(plugin.parse("CRIT >> Whirlwind >> 1234"))
@@ -227,7 +267,8 @@ describe("crit-tracker", function()
             "Zealot attacks Death Metal Slime and hits, dealing 73 points of critical damage from Chaos Bolt.")
         M.store.flush()
 
-        local file = io.open("/tmp/sotalua-crit-spec/sotalua-crits.jsonl", "r")
+        -- The log is split per character; this one belongs to Zealot.
+        local file = io.open("/tmp/sotalua-crit-spec/sotalua-crits-zealot.jsonl", "r")
         assert_that.truthy(file, "no crit log was written")
         local body = file:read("*a")
         file:close()

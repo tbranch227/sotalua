@@ -72,13 +72,18 @@ def lua_dir():
 
 
 def find_logs(explicit_dir):
+    """Every log file in the folder.
+
+    Names look like sotalua-<stream>-<character>.jsonl, plus a .1 rotated
+    generation. One install serves any number of characters, so a folder
+    normally holds several files per stream.
+    """
     directory = explicit_dir or lua_dir()
     if not directory or not os.path.isdir(directory):
         return []
-    # Both the live file and its rotated generation.
     return sorted(
         glob.glob(os.path.join(directory, "sotalua-*.jsonl"))
-        + glob.glob(os.path.join(directory, "sotalua-*.jsonl.1"))
+        + glob.glob(os.path.join(directory, "sotalua-*.1.jsonl"))
     )
 
 

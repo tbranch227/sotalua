@@ -31,6 +31,16 @@ return function(M)
     local stats = { appended = 0, written = 0, dropped = 0, failures = 0 }
     local installed = false
 
+    -- One install serves any number of characters, so the log is split by
+    -- character rather than tagged and shared. A shared file would let a busy
+    -- character rotate away another's history, and would make handing one
+    -- character's data to somebody else impossible.
+    --
+    -- The name is remembered rather than read at write time: ShroudGetPlayerName
+    -- returns "none" once the player is gone, and the most valuable record of
+    -- all -- the session summary -- is written at logout.
+    local character = nil
+
     ----------------------------------------------------------------------
     -- JSON encoding
     ----------------------------------------------------------------------
@@ -100,12 +110,41 @@ return function(M)
     -- Paths
     ----------------------------------------------------------------------
 
+    --- Make a character name safe to embed in a filename.
+    -- Names may contain spaces ("First Last") and are not otherwise constrained.
+    local function slugify(name)
+        local out = tostring(name or ""):gsub("[^%w]+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
+        if out == "" then return "unknown" end
+        return out:lower():sub(1, 40)
+    end
+
+    --- The character currently being logged for.
+    function S.character()
+        return character or "unknown"
+    end
+
+    --- Adopt the live character, flushing anything still queued for the old one.
+    --
+    -- A player can log out and back in as somebody else without restarting the
+    -- client, so this cannot be resolved once and forgotten. Called before every
+    -- append, never from flush, so the two cannot recurse.
+    local function syncCharacter()
+        local live = M.util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil)
+        if not live or live == character then return end
+        if character and #buffer > 0 then
+            -- Queued lines belong to the previous character's file.
+            S.flush()
+        end
+        character = live
+    end
+
     --- The log file's absolute path, or nil before the host publishes the path.
     --
     -- Flat in the Lua folder rather than a subdirectory: io.open cannot create
     -- directories, and writing to the Lua root is confirmed to work.
     function S.path(suffix)
-        return M.env.luaFile("sotalua-" .. config.name .. (suffix or "") .. ".jsonl")
+        return M.env.luaFile(
+            "sotalua-" .. config.name .. "-" .. slugify(character) .. (suffix or "") .. ".jsonl")
     end
 
     ----------------------------------------------------------------------
@@ -125,6 +164,8 @@ return function(M)
     -- Every record carries the wall-clock server time and the character, so a
     -- line remains meaningful after being merged with other characters' logs.
     function S.append(eventType, fields)
+        syncCharacter()
+
         if #buffer >= MAX_BUFFER then
             -- Drop rather than grow without bound: an addon that cannot write
             -- must not become an addon that exhausts memory.
@@ -136,7 +177,9 @@ return function(M)
             type = tostring(eventType),
             at = ShroudServerTime or "",
             t = ShroudTime or 0,
-            char = M.util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), "unknown"),
+            -- The remembered name, not a fresh read: this record may be written
+            -- at logout, when the live getter already reports no player.
+            char = S.character(),
         }
         for key, value in pairs(fields or {}) do
             if record[key] == nil then record[key] = value end
@@ -236,8 +279,19 @@ return function(M)
     function S.stats()
         local out = M.util.shallowCopy(stats)
         out.buffered = #buffer
+        out.character = S.character()
         out.path = S.path() or "(path not published yet)"
         return out
+    end
+
+    --- Adopt a character explicitly. For the login path, where an addon knows
+    --- who it is before the first event is appended.
+    function S.setCharacter(name)
+        local valid = M.util.nameOr(name, nil)
+        if not valid or valid == character then return false end
+        if character and #buffer > 0 then S.flush() end
+        character = valid
+        return true
     end
 
     --- Delete the log and its rotated generation.

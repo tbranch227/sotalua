@@ -88,7 +88,12 @@ local function freshWorld()
         sounds = {},
         channels = {},     -- 1-based, holds clip names
 
-        savedVars = { character = {}, account = {} },
+        -- The host namespaces character-scoped variables per character, as the
+        -- file layout shows: Lua/SavedVariables/<addon>.<character>.character.json
+        -- versus <addon>.account.json. One install serves any number of
+        -- characters, so modelling this as a single table would hide bleed
+        -- between them.
+        savedVars = { characters = {}, account = {} },
         inkVars = {},
 
         console = {},      -- every ShroudConsoleLog line
@@ -1034,8 +1039,13 @@ end
 
 local function scopeStore(scope)
     scope = tostring(scope or "character"):lower()
-    if scope ~= "account" then scope = "character" end
-    return world.savedVars[scope], scope
+    if scope == "account" then return world.savedVars.account, "account" end
+
+    -- Anything else, including nil, normalizes to the character scope, keyed by
+    -- whoever is logged in right now.
+    local who = world.player.name or "unknown"
+    world.savedVars.characters[who] = world.savedVars.characters[who] or {}
+    return world.savedVars.characters[who], "character"
 end
 
 function api.ShroudSetSavedVar(key, value, scope)
@@ -1141,6 +1151,20 @@ end
 
 function Host.logout()
     Host.fire("ShroudOnLogOut")
+end
+
+--- Log out and back in as somebody else, without restarting the client.
+--
+-- One install serves any number of characters and a player can switch without
+-- quitting, so anything that resolves the character once at load is wrong.
+-- ShroudGetPlayerName reports no player between the two, which is exactly when
+-- a session summary gets written.
+function Host.switchCharacter(name)
+    world.player.name = nil          -- ShroudGetPlayerName returns "none"
+    Host.fire("ShroudOnLogOut")
+    world.player.name = name
+    Host.refreshGlobals()
+    Host.fire("ShroudOnSceneLoaded", world.scene.name)
 end
 
 function Host.loadScene(name)

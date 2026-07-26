@@ -22,6 +22,30 @@ return function(M)
     local loaded = {}   -- key -> true once read through
     local dirty = false
 
+    -- One install serves any number of characters, and a player can switch
+    -- without restarting the client. The host swaps which file backs the
+    -- character scope, but this module's cache would happily keep serving the
+    -- previous character's values -- and write them back under the new one.
+    local character = nil
+
+    --- Drop cached values when the character changes.
+    --
+    -- Only a new *valid* name counts: ShroudGetPlayerName reports no player
+    -- during logout, and treating that as a switch would clear the cache at
+    -- exactly the moment the flush handlers need it.
+    local function syncCharacter()
+        local live = M.util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil)
+        if not live then return end
+        if character == nil then
+            character = live
+            return
+        end
+        if live ~= character then
+            character = live
+            cache, loaded = {}, {}
+        end
+    end
+
     local function validKey(key)
         if type(key) ~= "string" or key == "" then return false, "key must be a non-empty string" end
         if #key > MAX_KEY then return false, "key longer than " .. MAX_KEY .. " characters" end
@@ -79,6 +103,7 @@ return function(M)
     -- tables are deep-copied on first read. Mutating what get() returns would
     -- otherwise change the saved state without ever marking it dirty.
     function S.get(key)
+        syncCharacter()
         if loaded[key] then return cache[key] end
 
         local entry = schema[key]
@@ -106,6 +131,7 @@ return function(M)
 
     --- Write a setting. Nothing reaches disk until flush().
     function S.set(key, value)
+        syncCharacter()
         local ok, err = validKey(key)
         if not ok then
             M.log.error("settings.set rejected", key, "-", err)
