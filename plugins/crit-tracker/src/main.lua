@@ -331,6 +331,14 @@ return function(Core)
         -- all, which is a different problem from a pattern that does not match.
         state.lines = state.lines + 1
 
+        -- Announce the very first line. Whether chat reaches an addon at all on
+        -- this client is the single most useful unknown, and it should not need
+        -- a command to answer -- commands may not work here either.
+        if state.lines == 1 then
+            log.info(string.format("chat is reaching this addon (type=%q). Combat"
+                .. " lines will be parsed for criticals.", tostring(inputType)))
+        end
+
         if Core.settings.get("capture") then
             -- Discovery mode: record everything verbatim, with its type, so the
             -- real combat format can be read back offline.
@@ -401,9 +409,20 @@ return function(Core)
             ui.setText(view.rows[1], "no records yet")
         end
 
-        ui.setText(view.status, string.format("%d mine, %d pet, %d others, %d unmatched%s",
-            state.parsed, state.pets, state.others, state.unmatched,
+        -- The chat count leads, because it separates the two failures that look
+        -- identical from the outside: no chat reaching the addon at all, versus
+        -- chat arriving that nothing matches. Shown in the window rather than
+        -- behind a command, since /lua <function> may not work on every client.
+        ui.setText(view.status, string.format("chat %d | mine %d | pet %d | other %d | ?%d%s",
+            state.lines, state.parsed, state.pets, state.others, state.unmatched,
             Core.settings.get("capture") and "  [CAPTURING]" or ""))
+        ui.setColor(view.status, state.lines == 0 and "#C08050" or "#808080")
+
+        if state.lines == 0 and view.hint then
+            ui.setText(view.hint, "waiting for any chat line...")
+        elseif view.hint then
+            ui.setText(view.hint, "")
+        end
     end
 
     addon.onStart(function()
@@ -420,6 +439,8 @@ return function(Core)
                 view.rows[#view.rows + 1] = window:row("", { fontSize = 12, height = 15, gap = 0 })
             end
             view.status = window:row("", { fontSize = 10, color = "#808080" })
+            view.hint = window:row("waiting for any chat line...",
+                { fontSize = 10, color = "#C08050" })
             window:fit()
         end
 
@@ -454,6 +475,27 @@ return function(Core)
     end)
 
     addon.tick(1.0, render)
+
+    -- One unprompted report a minute after loading. If /lua commands do not
+    -- work on this client -- and on an older build they may not -- this is the
+    -- only way the addon can tell you what it is seeing.
+    addon.every("firstReport", 60, function()
+        Core.timers.cancel("firstReport")
+        if state.lines == 0 then
+            log.info("no chat lines have reached this addon in the first minute."
+                .. " If you have chatted or fought since loading, this client does"
+                .. " not send combat text to addons and crit tracking cannot work"
+                .. " here. Try the DEV client.")
+        elseif state.parsed == 0 and state.pets == 0 then
+            log.info(string.format("%d chat line(s) seen but no criticals parsed"
+                .. " (%d mentioned one without matching). Fight something, then"
+                .. " send a combat line so the pattern can be corrected.",
+                state.lines, state.unmatched))
+        else
+            log.info(string.format("working: %d critical(s) recorded, %d for a pet.",
+                state.parsed, state.pets))
+        end
+    end)
 
     ----------------------------------------------------------------------
     -- Commands
