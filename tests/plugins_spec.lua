@@ -10,9 +10,9 @@
 local H = dofile((os.getenv("SOTALUA_ROOT") or "./") .. "tests/helper.lua")
 
 local PLUGINS = {
-    "addon-inspector", "api-probe", "buff-bars", "event-fx", "loot-tracker",
-    "party-frames", "perf-monitor", "player-frame", "scene-info", "session-log",
-    "target-frame", "world-clock", "xp-tracker",
+    "addon-inspector", "api-probe", "buff-bars", "crit-tracker", "event-fx",
+    "loot-tracker", "party-frames", "perf-monitor", "player-frame", "scene-info",
+    "session-log", "target-frame", "world-clock", "xp-tracker",
 }
 
 --- A world with something in every system, so no plugin renders against nil.

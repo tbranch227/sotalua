@@ -1,0 +1,9 @@
+{
+  "slug": "crit-tracker",
+  "name": "Crit Tracker",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Remembers your biggest critical hit for every skill and celebrates when you beat one. Includes a capture mode for discovering your client's combat text format.",
+  "minApiVersion": 1,
+  "permissions": []
+}
