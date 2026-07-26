@@ -17,6 +17,7 @@ return function(Core)
         name = "Loot Tracker",
         slug = "loot-tracker",
         version = "1.0.0",
+        store = { name = "loot", flushSeconds = 45 },
         settings = {
             windows = { default = {} },
             rows = { default = 10, scope = "account" },
@@ -48,6 +49,7 @@ return function(Core)
         local prices = {}
         for _, item in ipairs(poll.inventory()) do prices[item.name] = item.value end
 
+        local scene = poll.scene()
         for name, quantity in pairs(counts) do
             local delta = quantity - (session.baseline[name] or 0)
             if delta ~= 0 then
@@ -55,6 +57,14 @@ return function(Core)
                 if delta > 0 then
                     session.value = session.value + delta * (prices[name] or 0)
                 end
+                -- One durable line per movement, so a later query can ask what
+                -- drops where, rather than only what this session totalled.
+                Core.store.append("item", {
+                    item = name,
+                    delta = delta,
+                    value = prices[name] or 0,
+                    scene = scene and scene.name or "",
+                })
             end
         end
         for name, quantity in pairs(session.baseline) do

@@ -21,6 +21,10 @@ return function(Core)
         name = "Session Log",
         slug = "session-log",
         version = "1.0.0",
+        -- Saved variables hold the recent history the in-game window shows;
+        -- the event log is the unbounded record for offline analysis, since a
+        -- saved value over 256 KB is silently dropped by the host.
+        store = { name = "sessions", flushSeconds = 60 },
         settings = {
             windows = { default = {} },
             sessions = { default = {} },
@@ -80,6 +84,28 @@ return function(Core)
             store[#store + 1] = entry
             while #store > MAX_SESSIONS do table.remove(store, 1) end
         end)
+
+        -- The same record, appended to the durable log. Unlike the saved
+        -- variable above this is never trimmed, so tools/ingest.py can build a
+        -- full history across every character.
+        --
+        -- A session with no duration and no gains is skipped: logout and
+        -- disable both close the session, so the second one is an empty window
+        -- that would otherwise pad the history with meaningless rows.
+        local empty = (entry.seconds or 0) <= 0
+            and (entry.adventurer or 0) == 0
+            and (entry.producer or 0) == 0
+            and (entry.gold or 0) == 0
+        if not empty then
+            Core.store.append("session", {
+                started = entry.started,
+                seconds = entry.seconds,
+                adventurer = entry.adventurer,
+                producer = entry.producer,
+                gold = entry.gold,
+                scenes = entry.scenes,
+            })
+        end
 
         -- Start a fresh window rather than leaving a half-closed one, so a
         -- disable followed by a logout cannot write the same session twice.

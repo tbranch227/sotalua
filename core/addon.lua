@@ -28,6 +28,12 @@ return function(M)
         M.poll.install()
         if opts.fx ~= false then M.fx.install() end
 
+        -- Opt-in: only addons that actually log history pay for a file handle.
+        if opts.store then
+            M.store.configure(type(opts.store) == "table" and opts.store or { name = opts.slug })
+            M.store.install()
+        end
+
         -- One global per addon for the timer pump. Derived from the slug so two
         -- addons in the shared environment cannot collide.
         M.timers.install(A.timerGlobal(opts.slug), opts.tickPeriod)
