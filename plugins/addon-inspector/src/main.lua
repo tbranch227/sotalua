@@ -74,8 +74,11 @@ return function(Core)
 
     addon.onStart(function()
         if not env.HAS_MOUSE then
-            log.error("this client is API " .. env.API
-                .. "; Addon Inspector needs API 2 or newer for the under-mouse API")
+            -- Informational, not an error. This client does not provide
+            -- ShroudGetKindUnderMouse and friends, so there is nothing to show;
+            -- that is a fact about the build, not a fault.
+            log.info("this client has no under-mouse API, so no window will be"
+                .. " shown. Nothing else is affected.")
             return
         end
 

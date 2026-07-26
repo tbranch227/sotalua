@@ -124,7 +124,11 @@ return function(Core)
 
     addon.onStart(function()
         if not env.HAS_TARGET then
-            log.error("this client is API " .. env.API .. "; Target Frame needs API 1 or newer")
+            -- Not an error: an older client simply does not have ShroudHasTarget
+            -- and the rest of the target API. Reporting this at error level made
+            -- a correct outcome look like a crash on reload.
+            log.info("this client has no target API, so no window will be shown."
+                .. " Nothing else is affected.")
             return
         end
 

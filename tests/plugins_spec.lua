@@ -104,6 +104,32 @@ describe("plugin lifecycle", function()
     end
 
     for _, slug in ipairs(PLUGINS) do
+        it(slug .. " reloads without errors on the oldest client", function()
+            -- The live client exactly: no ShroudLuaApiVersion, and none of the
+            -- target, under-mouse or buff-icon bindings. Every addon must
+            -- degrade quietly. A feature being unavailable is a fact about the
+            -- build, not a fault, so it must not be logged as an error --
+            -- otherwise a correct reload reads as a crash.
+            local M = H.bootstrap({
+                apiVersion = 0,
+                publishApiVersion = false,
+                world = populatedWorld,
+            })
+            H.plugin(slug, M)
+            H.installHandlers(M)
+
+            H.host.start()
+            H.host.frames(90, 1 / 30)
+            H.host.disable()
+
+            for _, line in ipairs(H.host.console()) do
+                assert_that.falsy(line:find("ERROR", 1, true),
+                    slug .. " reported an error on the oldest client: " .. line)
+            end
+        end)
+    end
+
+    for _, slug in ipairs(PLUGINS) do
         it(slug .. " runs on an unversioned client with legacy data shapes", function()
             -- The live client: no ShroudLuaApiVersion, and RuneEffects without
             -- RuneId or IconId. Every addon must degrade rather than error.
@@ -746,13 +772,15 @@ describe("addon-inspector", function()
         assert_that.is_true(H.host.hasText("kind npc   id 9"))
     end)
 
-    it("refuses to run on a client older than API 2", function()
+    it("stays quiet and builds nothing when the client lacks the API", function()
         local M = H.bootstrap({ apiVersion = 1, world = populatedWorld })
         H.plugin("addon-inspector", M)
         H.installHandlers(M)
         H.host.start()
 
-        assert_that.is_true(H.host.consoleContains("needs API 2 or newer"))
+        assert_that.is_true(H.host.consoleContains("no under-mouse API"))
+        assert_that.is_false(H.host.consoleContains("ERROR"),
+            "an unavailable feature is not an error")
         assert_that.equal(0, H.host.liveWidgetCount(),
             "no window should be built on an unsupported client")
     end)
