@@ -142,15 +142,14 @@ describe("event-fx", function()
         assert_that.is_true(H.host.hasText("South Fetid Swamp"))
     end)
 
-    it("announces entering and leaving combat", function()
+    it("never puts a combat banner on screen", function()
+        -- Removed at the player's request: the game already shows combat state,
+        -- and a permanent centre-screen label is in the way rather than useful.
         build()
         H.host.world.player.combat = true
-        H.host.frames(30, 1 / 30)
-        assert_that.is_true(H.host.hasText("IN COMBAT"))
-
-        H.host.world.player.combat = false
-        H.host.frames(30, 1 / 30)
+        H.host.frames(60, 1 / 30)
         assert_that.is_false(H.host.hasText("IN COMBAT"))
+        assert_that.is_false(H.host.hasText("COMBAT"))
     end)
 
     it("names a newly acquired target once", function()

@@ -20,7 +20,6 @@ return function(Core)
         settings = {
             xpToasts = { default = true, scope = "account" },
             lowHealthPulse = { default = true, scope = "account" },
-            combatFlash = { default = true, scope = "account" },
             sceneBanner = { default = true, scope = "account" },
             targetFlash = { default = true, scope = "account" },
             lowHealthPercent = { default = 30, scope = "account" },
@@ -34,7 +33,6 @@ return function(Core)
     local view = { toasts = {}, edges = {} }
     local state = {
         nextToast = 1,
-        inCombat = false,
         lastTargetId = nil,
         wasLow = false,
         lastHealth = nil,
@@ -142,22 +140,6 @@ return function(Core)
     addon.tick(0.2, function()
         local player = poll.player()
 
-        if Core.settings.get("combatFlash") then
-            local inCombat = ShroudGetPlayerCombatMode and ShroudGetPlayerCombatMode() or false
-            if inCombat ~= state.inCombat then
-                state.inCombat = inCombat
-                if view.combat then
-                    ui.setText(view.combat, inCombat and "IN COMBAT" or "")
-                    ui.setVisible(view.combat, inCombat)
-                    if inCombat then
-                        ui.setPosition(view.combat, screenWidth() * 0.5 - 60, screenHeight() * 0.28)
-                        fx.scale(view.combat, 1.6, 1.0, 0.35, fx.ease.outBack)
-                        fx.fade(view.combat, 0, 0.9, 0.35)
-                    end
-                end
-            end
-        end
-
         if Core.settings.get("lowHealthPulse") then
             -- Health has no maximum global, so the threshold is measured
             -- against the highest value seen rather than a true max.
@@ -222,15 +204,11 @@ return function(Core)
             text = "", x = 0, y = 0, width = 400, height = 34, fontSize = 26,
             color = "#FFD98A", align = TextAnchor and TextAnchor.MiddleCenter or nil,
         })
-        view.combat = ui.text({
-            text = "", x = 0, y = 0, width = 120, height = 22, fontSize = 16,
-            color = "#FF7A4A", align = TextAnchor and TextAnchor.MiddleCenter or nil,
-        })
         view.target = ui.text({
             text = "", x = 0, y = 0, width = 200, height = 22, fontSize = 15,
             color = "#E0C88A", align = TextAnchor and TextAnchor.MiddleCenter or nil,
         })
-        for _, widget in ipairs({ view.banner, view.combat, view.target }) do
+        for _, widget in ipairs({ view.banner, view.target }) do
             if widget then
                 ui.setRaycast(widget, false)
                 ui.setVisible(widget, false)
@@ -288,12 +266,12 @@ return function(Core)
 
     addon.command("toggle", function(name)
         local keys = {
-            xp = "xpToasts", health = "lowHealthPulse", combat = "combatFlash",
+            xp = "xpToasts", health = "lowHealthPulse",
             scene = "sceneBanner", target = "targetFlash",
         }
         local key = keys[tostring(name or ""):lower()]
         if not key then
-            log.say("usage: /lua _EventFx_toggle xp|health|combat|scene|target")
+            log.say("usage: /lua _EventFx_toggle xp|health|scene|target")
             return
         end
         local enabled = not Core.settings.get(key)
@@ -305,7 +283,7 @@ return function(Core)
     addon.command("status", function()
         log.say(string.format("%d tween(s) running, %d toast slots",
             fx.activeCount(), #view.toasts))
-        for _, key in ipairs({ "xpToasts", "lowHealthPulse", "combatFlash",
+        for _, key in ipairs({ "xpToasts", "lowHealthPulse",
                                "sceneBanner", "targetFlash" }) do
             log.say(string.format("  %-16s %s", key,
                 Core.settings.get(key) and "on" or "off"))
