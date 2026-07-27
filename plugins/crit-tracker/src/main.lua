@@ -153,69 +153,35 @@ return function(Core)
         return nil
     end
 
-    --- The pet's name, remembered across the session.
-    --
-    -- ShroudGetPetInfo returns nil whenever the pet is dismissed, dead or not
-    -- yet summoned, and a critical can still be in flight at that moment, so
-    -- the last known name is kept rather than read fresh each time.
+    --- The pet's name. Resolution and remembering live in core/combat, which
+    --- keeps the last known name across a dismissal.
     local function petName()
-        local override = Core.settings.get("petName")
-        if type(override) == "string" and override ~= "" then return override end
+        return Core.combat.petName()
+    end
 
-        local pet = poll.pet()
-        local live = pet and util.nameOr(util.field(pet, "Name", nil), nil)
-        if live then state.petName = live end
-        return state.petName
+    --- Push this addon's name overrides into the shared classifier.
+    local function syncNames()
+        Core.combat.setNames({
+            character = Core.settings.get("characterName"),
+            pet = Core.settings.get("petName"),
+            trackPet = Core.settings.get("trackPet") ~= false,
+        })
     end
 
     --- Is this line describing the player's pet?
-    --
-    -- Two shapes are handled: the pet acting under its own name, and a
-    -- possessive form built from the owner's name. Which one this client uses
-    -- is unconfirmed, so both are accepted.
     local function isPet(attacker)
-        if not attacker or attacker == "" then return false end
         if not Core.settings.get("trackPet") then return false end
-
-        local lowered = attacker:lower()
-
-        local pet = petName()
-        if pet and lowered == pet:lower() then return true end
-
-        local mine = util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil)
-        local override = Core.settings.get("characterName")
-        if type(override) == "string" and override ~= "" then mine = override end
-        if mine then
-            -- "Zealot's pet", "Zealot's Wolf", and similar.
-            if lowered:sub(1, #mine + 2) == mine:lower() .. "'s" then return true end
-        end
-        return false
+        syncNames()
+        return Core.combat.classify(attacker) == "pet"
     end
 
     --- Is this line describing the tracked character's own hit?
     --
     -- The combat log is broadcast for everyone nearby, so without this every
-    -- party member's critical would land in your records. An override exists
-    -- because ShroudGetPlayerName returns the display name, which need not be
-    -- exactly the name the combat log prints.
+    -- party member's critical would land in your records.
     local function isSelf(attacker)
-        if not attacker or attacker == "" then
-            -- No attacker in the line: the fallback pattern only runs when the
-            -- line named nobody, so there is no one else it could belong to.
-            return true
-        end
-
-        local override = Core.settings.get("characterName")
-        local mine = (type(override) == "string" and override ~= "")
-            and override
-            or util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil)
-        if not mine then return false end
-
-        local a, b = attacker:lower(), mine:lower()
-        if a == b then return true end
-        -- Tolerate one being a leading part of the other ("Zealot" against
-        -- "Zealot Ravenmoor"), but only on a word boundary.
-        return a:sub(1, #b + 1) == b .. " " or b:sub(1, #a + 1) == a .. " "
+        syncNames()
+        return Core.combat.classify(attacker) == "self"
     end
 
     ----------------------------------------------------------------------

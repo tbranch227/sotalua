@@ -13,6 +13,7 @@ return {
     "events",   -- env
     "timers",   -- env, log, util
     "poll",     -- env, util
+    "combat",   -- env, util, events, poll
     "store",    -- env, log, util, timers, events
     "ui",       -- env, log, util, events
     "fx",       -- ui, events, env, util

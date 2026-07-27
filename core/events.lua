@@ -46,10 +46,24 @@ return function(M)
         return tostring(kind) .. ":" .. tostring(id)
     end
 
+    -- Set once handlers() has run, i.e. once the host has been given the
+    -- callbacks it will use for the rest of the session.
+    local published = nil
+
     --- Subscribe to a host callback. Returns an unsubscribe function.
     function E.on(name, handler, label)
         name = E.ALIASES[name] or name
         local list = subscribers[name]
+
+        -- Subscribing to a callback that was not published is silent and total:
+        -- the host never calls a global that does not exist, so the handler
+        -- simply never runs. That is what happens when a plugin subscribes
+        -- during ShroudOnStart, which fires after the callbacks were captured.
+        if published and not published[name] then
+            M.log.warn(name, "subscribed too late to be installed; move the"
+                .. " subscription to the plugin body, outside ShroudOnStart")
+        end
+
         if not list then
             list = {}
             subscribers[name] = list
@@ -177,12 +191,14 @@ return function(M)
             if wanted[name] then out[name] = fn end
         end
 
+        published = wanted
         return out
     end
 
     function E.reset()
         subscribers = {}
         widgetHandlers = {}
+        published = nil
     end
 
     return E

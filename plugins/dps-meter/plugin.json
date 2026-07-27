@@ -1,0 +1,9 @@
+{
+  "slug": "dps-meter",
+  "name": "DPS Meter",
+  "version": "1.0.0",
+  "author": "sotalua",
+  "description": "Damage per second for you, your pet and your party, broken down per fight with a running total and a personal best. Reads the combat log, so it shows whoever's damage that log carries.",
+  "minApiVersion": 1,
+  "permissions": []
+}
