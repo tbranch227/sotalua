@@ -128,6 +128,10 @@ return function(Core)
         local name, kind = actorFor(hit)
         if not name then
             state.excluded = state.excluded + 1
+            -- Remembered so the window can say *who* was ignored. If the client
+            -- writes your name differently from ShroudGetPlayerName(), every
+            -- one of your own hits lands here and the meter looks broken.
+            state.lastIgnored = hit.attacker
             return
         end
 
@@ -179,6 +183,36 @@ return function(Core)
         self = "#9FE08F", pet = "#C89AE0", party = "#7FB8FF", other = "#A0A0A0",
     }
 
+    --- What to show when there is nothing to show.
+    --
+    -- An empty meter has several quite different causes, and the player cannot
+    -- tell them apart by looking. Since this client offers no `/lua` commands,
+    -- the window is the only place a diagnosis can appear at all, so it says
+    -- which stage is failing rather than an unhelpful "waiting".
+    local function renderIdle()
+        local lines, broken = combat.diagnose()
+
+        -- combat.diagnose only sees as far as parsing. Damage that parsed and
+        -- was then filtered out is this addon's own doing, so it explains it.
+        if not broken and combat.stats.parsed > 0 and state.excluded > 0 then
+            local mine = util.nameOr(ShroudGetPlayerName and ShroudGetPlayerName(), nil)
+            lines = {
+                { text = state.excluded .. " hit(s) ignored as not yours", color = "#E08A5C" },
+                { text = "log says \"" .. util.ellipsize(state.lastIgnored or "?", 20)
+                    .. "\"", color = "#909090" },
+                { text = "you are \"" .. (mine or "unknown") .. "\"", color = "#909090" },
+            }
+        elseif not broken then
+            lines = { { text = "waiting for combat...", color = "#808080" } }
+        end
+
+        for index, row in ipairs(view.rows) do
+            local line = lines[index]
+            ui.setText(row, line and line.text or "")
+            if line then ui.setColor(row, line.color) end
+        end
+    end
+
     local function render()
         if not view.window then return end
 
@@ -228,10 +262,7 @@ return function(Core)
             end
         end
 
-        if #ranked == 0 and view.rows[1] then
-            ui.setText(view.rows[1], "waiting for combat...")
-            ui.setColor(view.rows[1], "#808080")
-        end
+        if #ranked == 0 then renderIdle() end
 
         ui.setText(view.live, string.format("last %ds: %s dps",
             LIVE_WINDOW, util.short(liveTotal / LIVE_WINDOW)))

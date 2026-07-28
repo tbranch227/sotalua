@@ -24,13 +24,13 @@ return function(M)
     local PATTERNS = {
         {
             pattern = "(" .. NAME .. ") attacks (" .. NAME
-                .. ") and hits, dealing (%d+) points? of critical damage from (.+)$",
+                .. ") and hits, dealing ([%d,]+) points? of critical damage from (.+)$",
             captures = { "attacker", "target", "damage", "skill" },
             critical = true,
         },
         {
             pattern = "(" .. NAME .. ") attacks (" .. NAME
-                .. ") and hits, dealing (%d+) points? of damage from (.+)$",
+                .. ") and hits, dealing ([%d,]+) points? of damage from (.+)$",
             captures = { "attacker", "target", "damage", "skill" },
             critical = false,
         },
@@ -41,7 +41,16 @@ return function(M)
     local subscribers = {}
     local installed = false
 
-    C.stats = { lines = 0, parsed = 0, unmatched = 0, channels = {} }
+    -- `calls` counts every invocation of the chat callback, `lines` only those
+    -- that arrived with a usable string. The two are separate on purpose: if
+    -- the host is calling us but nothing is being counted, the argument shape
+    -- is wrong, and no amount of pattern work would ever fix it.
+    C.stats = {
+        calls = 0, lines = 0, parsed = 0, unmatched = 0, channels = {},
+        argShape = nil,        -- types of the first call, as a string
+        lastLine = nil,        -- last chat line seen, markup stripped
+        lastDamageLine = nil,  -- last line that looked like damage but did not parse
+    }
 
     ----------------------------------------------------------------------
     -- Parsing
@@ -72,7 +81,11 @@ return function(M)
                 local fields = {}
                 for index, name in ipairs(entry.captures) do fields[name] = found[index] end
 
-                local damage = tonumber(fields.damage)
+                -- Thousands separators appear once hits get large enough, and
+                -- dropping exactly the biggest hits is the worst possible
+                -- failure for a meter that reports peaks.
+                local digits = tostring(fields.damage or ""):gsub(",", "")
+                local damage = tonumber(digits)
                 local skill = tidySkill(fields.skill)
                 if skill and damage and damage > 0 then
                     return {
@@ -168,6 +181,23 @@ return function(M)
     -- Dispatch
     ----------------------------------------------------------------------
 
+    --- The longest string among the arguments, or nil if there is none.
+    --
+    -- Used only to recover a message from a callback whose arguments did not
+    -- arrive in the documented order. A chat line is far longer than a channel
+    -- name or a player name, so "longest" identifies it reliably enough to be
+    -- worth trying before giving up entirely.
+    local function longestString(...)
+        local best = nil
+        for index = 1, select("#", ...) do
+            local value = select(index, ...)
+            if type(value) == "string" and (not best or #value > #best) then
+                best = value
+            end
+        end
+        return best
+    end
+
     --- Subscribe to parsed damage events: fn(hit, inputType, rawLine).
     function C.onDamage(handler, label)
         local wrapped = M.env.protect(label or "combat.onDamage", handler)
@@ -192,19 +222,37 @@ return function(M)
         if installed then return C end
         installed = true
 
-        M.events.on("ShroudOnConsoleInput", function(inputType, _source, message)
+        M.events.on("ShroudOnConsoleInput", function(inputType, source, message)
+            C.stats.calls = C.stats.calls + 1
+            if not C.stats.argShape then
+                C.stats.argShape = table.concat({
+                    type(inputType), type(source), type(message) }, ",")
+            end
+
+            -- The documented signature is (inputType, sourcePlayer, message),
+            -- but an older build that passes them in another order would
+            -- otherwise fail completely silently. Only consulted when the
+            -- third argument is not a string, so a client that behaves as
+            -- documented takes exactly the same path it always did.
+            if type(message) ~= "string" then
+                message = longestString(inputType, source, message)
+            end
             if type(message) ~= "string" or message == "" then return end
 
             C.stats.lines = C.stats.lines + 1
-            local channel = tostring(inputType or "?")
+            local channel = type(inputType) == "string" and inputType or "?"
             C.stats.channels[channel] = (C.stats.channels[channel] or 0) + 1
+
+            local stripped = M.util.stripMarkup(message)
+            C.stats.lastLine = stripped
 
             local hit = C.parse(message)
             if not hit then
                 -- Only counted as unmatched when it looked like it should have
                 -- parsed; ordinary conversation is not a failure.
-                if M.util.stripMarkup(message):find(" points of ", 1, true) then
+                if stripped:find(" points of ", 1, true) then
                     C.stats.unmatched = C.stats.unmatched + 1
+                    C.stats.lastDamageLine = stripped
                 end
                 return
             end
@@ -216,6 +264,53 @@ return function(M)
         end, "combat.router")
 
         return C
+    end
+
+    --- Why nothing is being recorded, as lines fit for display.
+    --
+    -- A combat feature built on chat text has exactly three ways to fail, and
+    -- from the player's side they look identical: an empty window. This tells
+    -- them apart. It matters most on clients with no `/lua` command support,
+    -- where a window is the only channel an addon has to report anything.
+    --
+    -- Returns a list of { text, color } and a boolean: whether anything is
+    -- actually wrong. Healthy means damage is parsing, whatever happens to it
+    -- downstream.
+    function C.diagnose()
+        local dim, bad = "#909090", "#E08A5C"
+
+        if C.stats.calls == 0 then
+            return {
+                { text = "no chat is reaching this addon", color = bad },
+                { text = "this client may not call ShroudOnConsoleInput", color = dim },
+            }, true
+        end
+
+        if C.stats.lines == 0 then
+            return {
+                { text = "chat arrives, but carries no text", color = bad },
+                { text = "arguments came as (" .. tostring(C.stats.argShape) .. ")", color = dim },
+            }, true
+        end
+
+        if C.stats.parsed == 0 then
+            local out = {
+                { text = C.stats.lines .. " chat line(s), no damage recognised", color = bad },
+            }
+            -- The exact wording of combat text is client data published
+            -- nowhere, so showing a real line is the only way to learn it.
+            local sample = C.stats.lastDamageLine or C.stats.lastLine
+            if sample then
+                out[#out + 1] = { text = M.util.ellipsize(sample, 44), color = dim }
+            end
+            if C.stats.unmatched > 0 then
+                out[#out + 1] = { text = C.stats.unmatched
+                    .. " line(s) mentioned damage but did not match", color = dim }
+            end
+            return out, true
+        end
+
+        return {}, false
     end
 
     --- Channels seen, most frequent first. Diagnostic: it answers whether a

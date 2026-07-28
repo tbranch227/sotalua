@@ -1232,6 +1232,14 @@ function Host.chat(inputType, source, message)
     Host.fire("ShroudOnConsoleInput", inputType, source, message)
 end
 
+--- Fire the chat callback with arbitrary arguments, in any order.
+--
+-- Models a client that does not honour the documented (inputType, source,
+-- message) signature, so an addon can be tested against one.
+function Host.rawChat(...)
+    Host.fire("ShroudOnConsoleInput", ...)
+end
+
 function Host.gainExperience(kind, amount)
     if kind == "Adventurer" then
         world.experience.pooledAdv = world.experience.pooledAdv + amount

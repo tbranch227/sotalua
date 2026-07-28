@@ -49,6 +49,19 @@ describe("combat parser", function()
         assert_that.is_true(crit.critical)
     end)
 
+    it("reads a damage number written with thousands separators", function()
+        local hit = M.combat.parse(line("Zealot", "X", 0, "Rend")
+            :gsub("dealing 0 points", "dealing 12,480 points"))
+        assert_that.equal(12480, hit.damage)
+    end)
+
+    it("recovers a message delivered in an undocumented argument order", function()
+        -- An older build passing the arguments differently would otherwise
+        -- fail completely silently, which is the one outcome worth avoiding.
+        H.host.rawChat(line("Zealot", "X", 77, "Bow"), "CombatSelf", nil)
+        assert_that.equal(1, M.combat.stats.parsed)
+    end)
+
     it("ignores chat that is not combat", function()
         assert_that.nil_(M.combat.parse(" to everyone [System]: Elrich is now online."))
         assert_that.nil_(M.combat.parse("Zealot: watch out"))
@@ -291,6 +304,43 @@ describe("dps-meter", function()
         H.host.loadScene("Etceter")
         assert_that.nil_(plugin.state.startedAt)
         assert_that.equal(1, plugin.state.encounters)
+    end)
+
+    it("says so when no chat reaches it at all", function()
+        build()
+        plugin.render()
+        assert_that.is_true(H.host.hasText("no chat is reaching this addon"))
+    end)
+
+    it("says so when chat arrives but nothing parses", function()
+        build()
+        H.host.chat("CombatSelf", "", " to everyone [CombatSelf]: Zealot"
+            .. " obliterates Practice Dummy for 40 points of harm.")
+        plugin.render()
+        assert_that.is_true(H.host.hasText("no damage recognised"))
+    end)
+
+    it("names the attacker it ignored, and the name it knows you by", function()
+        -- The failure that looks most like a broken addon: every one of your
+        -- own hits filtered out because the log spells your name differently.
+        build({ world = function(w)
+            w.luaPath = "/tmp/sotalua-dps-spec/"
+            w.player.name = "Zealot"
+        end })
+        hit("Zeal0t", 200)
+        plugin.render()
+
+        assert_that.equal(1, plugin.state.excluded)
+        assert_that.is_true(H.host.hasText("ignored as not yours"))
+        assert_that.is_true(H.host.hasText("Zeal0t"))
+        assert_that.is_true(H.host.hasText("Zealot"), "it never says who it thinks you are")
+    end)
+
+    it("stops diagnosing once damage is flowing", function()
+        build()
+        hit("Zealot", 120)
+        local _, broken = M.combat.diagnose()
+        assert_that.is_false(broken)
     end)
 
     it("shows who is doing the damage", function()
